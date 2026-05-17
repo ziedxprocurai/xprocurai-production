@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  password     String?
+  fullName     String?      @map("full_name")
+  avatarUrl    String?      @map("avatar_url")
+  authProvider AuthProvider @default(LOCAL) @map("auth_provider")
+  role         Role         @default(USER)
+  isActive     Boolean      @default(true) @map("is_active")
+  onboarded    Boolean      @default(false)
+  companyId    String?      @map("company_id")
+  company      Company?     @relation(fields: [companyId], references: [id])
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Company {
+  id            String        @id @default(cuid())
+  legalName     String        @map("legal_name")
+  website       String?
+  country       String
+  city          String?
+  industry      String?
+  companySize   CompanySize?  @map("company_size")
+  phoneNumber   String?       @map("phone_number")
+  email         String?
+  description   String?
+  roles         CompanyRole[] @default([BUYER])
+  onboardingStatus OnboardingStatus @default(PENDING) @map("onboarding_status")
+  users         User[]
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@map("companies")
+}
+
+enum Role {
+  ADMIN
+  USER
+  MANAGER
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}
+
+enum CompanyRole {
+  BUYER
+  SUPPLIER
+}
+
+enum CompanySize {
+  SOLE_PROPRIETOR
+  SMALL
+  MEDIUM
+  LARGE
+  ENTERPRISE
+}
+
+enum OnboardingStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}

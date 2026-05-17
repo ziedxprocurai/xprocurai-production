@@ -1,0 +1,44 @@
+# =============================================================
+# xProcurAI Web - systemd Service Unit
+# =============================================================
+# Copy to: /etc/systemd/system/xprocurai-web.service
+# Enable:  sudo systemctl enable xprocurai-web
+# Start:   sudo systemctl start xprocurai-web
+# Status:  sudo systemctl status xprocurai-web
+# Logs:    sudo journalctl -u xprocurai-web -f
+# =============================================================
+
+[Unit]
+Description=xProcurAI Web (Next.js)
+Documentation=https://github.com/your-org/xprocurai
+After=network.target xprocurai-api.service
+
+[Service]
+Type=simple
+User=xprocurai
+Group=xprocurai
+WorkingDirectory=/opt/xprocurai/apps/web
+ExecStart=/usr/bin/npx next start --port 3000
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Environment
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/xprocurai/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/xprocurai
+PrivateTmp=true
+
+# Logging
+StandardOutput=append:/var/log/xprocurai/web-out.log
+StandardError=append:/var/log/xprocurai/web-error.log
+SyslogIdentifier=xprocurai-web
+
+[Install]
+WantedBy=multi-user.target

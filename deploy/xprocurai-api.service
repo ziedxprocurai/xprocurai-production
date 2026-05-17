@@ -1,0 +1,45 @@
+# =============================================================
+# xProcurAI API - systemd Service Unit
+# =============================================================
+# Copy to: /etc/systemd/system/xprocurai-api.service
+# Enable:  sudo systemctl enable xprocurai-api
+# Start:   sudo systemctl start xprocurai-api
+# Status:  sudo systemctl status xprocurai-api
+# Logs:    sudo journalctl -u xprocurai-api -f
+# =============================================================
+
+[Unit]
+Description=xProcurAI API (NestJS)
+Documentation=https://github.com/your-org/xprocurai
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=xprocurai
+Group=xprocurai
+WorkingDirectory=/opt/xprocurai/apps/api
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Environment
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/xprocurai/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/xprocurai
+PrivateTmp=true
+
+# Logging
+StandardOutput=append:/var/log/xprocurai/api-out.log
+StandardError=append:/var/log/xprocurai/api-error.log
+SyslogIdentifier=xprocurai-api
+
+[Install]
+WantedBy=multi-user.target
