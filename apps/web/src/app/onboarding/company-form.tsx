@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import {
   Building2,
   Globe,
@@ -69,6 +70,7 @@ interface FormErrors {
 
 export function CompanyForm() {
   const { data: session } = useSession();
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -139,14 +141,10 @@ export function CompanyForm() {
     setSubmitting(true);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-      const accessToken = (session as any)?.accessToken;
-
-      const res = await fetch(`${apiUrl}/companies`, {
+      const res = await fetch('/api/companies', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: JSON.stringify({
           legalName: form.legalName,
@@ -164,6 +162,8 @@ export function CompanyForm() {
 
       if (res.ok) {
         setSubmitted(true);
+        // Redirect to dashboard after short delay for success animation
+        setTimeout(() => router.push('/dashboard'), 1500);
       } else {
         const data = await res.json().catch(() => null);
         setErrors({ submit: data?.message || 'Failed to create company. Please try again.' });
@@ -189,7 +189,7 @@ export function CompanyForm() {
           using the platform.
         </p>
         <a
-          href="/"
+          href="/dashboard"
           className="mt-8 inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-6 py-3 text-sm font-semibold text-white transition-all hover:opacity-90"
         >
           Go to Dashboard

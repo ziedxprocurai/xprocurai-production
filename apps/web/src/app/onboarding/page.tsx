@@ -9,6 +9,11 @@ export default async function OnboardingPage() {
     redirect('/auth/signin');
   }
 
+  // If user is already onboarded, redirect to dashboard
+  if ((session as any).user?.onboarded) {
+    redirect('/dashboard');
+  }
+
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] px-6 py-12">
       <div className="mx-auto max-w-2xl">

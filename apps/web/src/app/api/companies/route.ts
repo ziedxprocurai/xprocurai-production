@@ -1,0 +1,85 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+
+export const runtime = 'nodejs';
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
+  }
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+
+  // Always get a fresh backend token for the request
+  let accessToken: string | null = null;
+  try {
+    const syncRes = await fetch(`${apiUrl}/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: session.user.email,
+        fullName: session.user.name || '',
+        avatarUrl: session.user.image || '',
+      }),
+    });
+    if (syncRes.ok) {
+      const data = await syncRes.json();
+      accessToken = data.accessToken;
+    } else {
+      console.error('[api/companies] /auth/google returned:', syncRes.status);
+    }
+  } catch (err) {
+    console.error('[api/companies] Backend sync failed:', err);
+  }
+
+  if (!accessToken) {
+    return NextResponse.json(
+      { message: 'Failed to authenticate with backend API' },
+      { status: 502 },
+    );
+  }
+
+  // Forward the company creation request to the backend
+  try {
+    const body = await req.json();
+    const res = await fetch(`${apiUrl}/companies`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      console.error('[api/companies] Backend returned:', res.status, data);
+      return NextResponse.json(
+        data || { message: 'Failed to create company' },
+        { status: res.status },
+      );
+    }
+
+    // Complete onboarding for the newly created company
+    if (data?.id) {
+      try {
+        await fetch(`${apiUrl}/companies/${data.id}/complete-onboarding`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+      } catch {
+        // Non-critical — onboarding status can be updated later
+      }
+    }
+
+    return NextResponse.json(data);
+  } catch (err) {
+    console.error('[api/companies] Request failed:', err);
+    return NextResponse.json(
+      { message: 'Failed to connect to backend API' },
+      { status: 502 },
+    );
+  }
+}

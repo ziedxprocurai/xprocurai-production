@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { Menu, X, Hexagon, LogOut } from 'lucide-react';
+import { Menu, X, Hexagon, LogOut, User, Settings, LayoutDashboard, ChevronDown } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 const navLinks = [
@@ -13,8 +13,22 @@ const navLinks = [
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const { data: session, status } = useSession();
   const isAuthenticated = status === 'authenticated' && !!session;
+  const isOnboarded = isAuthenticated && (session as any)?.user?.onboarded;
+  const authLink = isOnboarded ? '/dashboard' : '/onboarding';
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <header className="fixed top-0 z-50 w-full border-b border-[hsl(var(--border))]/40 bg-[hsl(var(--background))]/80 backdrop-blur-xl">
@@ -46,9 +60,9 @@ export function Navbar() {
         <div className="hidden items-center gap-3 md:flex">
           <ThemeToggle />
           {isAuthenticated ? (
-            <>
-              <a
-                href="/onboarding"
+            <div className="relative" ref={userMenuRef}>
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
                 className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
               >
                 {session.user?.image ? (
@@ -63,15 +77,51 @@ export function Navbar() {
                   </div>
                 )}
                 <span className="max-w-[120px] truncate">{session.user?.name}</span>
-              </a>
-              <button
-                onClick={() => signOut({ callbackUrl: '/' })}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
-                aria-label="Sign out"
-              >
-                <LogOut className="h-4 w-4" />
+                <ChevronDown className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
               </button>
-            </>
+
+              {/* Dropdown Menu */}
+              {userMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-56 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] py-1 shadow-lg">
+                  <div className="border-b border-[hsl(var(--border))] px-4 py-3">
+                    <p className="text-sm font-medium text-[hsl(var(--foreground))]">
+                      {session.user?.name}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-[hsl(var(--muted-foreground))]">
+                      {session.user?.email}
+                    </p>
+                  </div>
+                  {isOnboarded && (
+                    <a
+                      href="/dashboard"
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <LayoutDashboard className="h-4 w-4" />
+                      Dashboard
+                    </a>
+                  )}
+                  <a
+                    href="/settings"
+                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <Settings className="h-4 w-4" />
+                    Settings
+                  </a>
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      signOut({ callbackUrl: '/' });
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-500 transition-colors hover:bg-[hsl(var(--muted))]"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Sign Out
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <>
               <a
@@ -120,23 +170,46 @@ export function Navbar() {
             <hr className="my-2 border-[hsl(var(--border))]/40" />
             {isAuthenticated ? (
               <>
+                <div className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    {session.user?.image ? (
+                      <img src={session.user.image} alt="" className="h-10 w-10 rounded-full" />
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-sm font-bold text-white">
+                        {session.user?.name?.charAt(0) || '?'}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-[hsl(var(--foreground))]">
+                        {session.user?.name}
+                      </p>
+                      <p className="truncate text-xs text-[hsl(var(--muted-foreground))]">
+                        {session.user?.email}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                {isOnboarded && (
+                  <a
+                    href="/dashboard"
+                    onClick={() => setMobileOpen(false)}
+                    className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
+                  >
+                    <LayoutDashboard className="h-4 w-4" />
+                    Dashboard
+                  </a>
+                )}
                 <a
-                  href="/onboarding"
+                  href="/settings"
                   onClick={() => setMobileOpen(false)}
                   className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
                 >
-                  {session.user?.image ? (
-                    <img src={session.user.image} alt="" className="h-7 w-7 rounded-full" />
-                  ) : (
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-xs font-bold text-white">
-                      {session.user?.name?.charAt(0) || '?'}
-                    </div>
-                  )}
-                  {session.user?.name}
+                  <Settings className="h-4 w-4" />
+                  Settings
                 </a>
                 <button
                   onClick={() => { signOut({ callbackUrl: '/' }); setMobileOpen(false); }}
-                  className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-red-500 transition-colors hover:bg-[hsl(var(--muted))]"
+                  className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-red-500 transition-colors hover:bg-[hsl(var(--muted))]"
                 >
                   <LogOut className="h-4 w-4" />
                   Sign Out
