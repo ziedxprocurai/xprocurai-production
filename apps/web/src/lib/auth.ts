@@ -125,12 +125,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         session.user.image = bu.avatarUrl || token.picture;
         (session as any).user.role = bu.role;
         (session as any).user.onboarded = bu.onboarded;
+        (session as any).user.isAdmin = bu.isAdmin || false;
       } else {
         // Backend not available — use Google profile data directly
         session.user.name = token.name as string;
         session.user.image = token.picture as string;
         session.user.email = token.email as string;
         (session as any).user.onboarded = false;
+        (session as any).user.isAdmin = false;
       }
 
       // Always pass accessToken if available

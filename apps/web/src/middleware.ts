@@ -6,5 +6,6 @@ export const config = {
     '/onboarding/:path*',
     '/settings/:path*',
     '/suppliers/:path*',
+    '/admin/:path*',
   ],
 };

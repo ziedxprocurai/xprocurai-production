@@ -7,6 +7,11 @@ import { RedisModule } from './redis/redis.module';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { CompanyModule } from './company/company.module';
+import { AdminModule } from './admin/admin.module';
+import { ProductModule } from './product/product.module';
+import { RFQModule } from './rfq/rfq.module';
+import { ERPModule } from './erp/erp.module';
+import { ProviderImportModule } from './provider-import/provider-import.module';
 
 @Module({
   imports: [
@@ -19,6 +24,11 @@ import { CompanyModule } from './company/company.module';
     AuthModule,
     HealthModule,
     CompanyModule,
+    AdminModule,
+    ProductModule,
+    RFQModule,
+    ERPModule,
+    ProviderImportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

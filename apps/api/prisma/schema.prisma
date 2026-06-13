@@ -15,6 +15,7 @@ model User {
   avatarUrl    String?      @map("avatar_url")
   authProvider AuthProvider @default(LOCAL) @map("auth_provider")
   role         Role         @default(USER)
+  isAdmin      Boolean      @default(false) @map("is_admin")
   isActive     Boolean      @default(true) @map("is_active")
   onboarded    Boolean      @default(false)
   companyId    String?      @map("company_id")
@@ -38,7 +39,14 @@ model Company {
   description   String?
   roles         CompanyRole[] @default([BUYER])
   onboardingStatus OnboardingStatus @default(PENDING) @map("onboarding_status")
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
   users         User[]
+  products      Product[]
+  erpConnection ERPConnection?
+  sentRFQs      RFQ[]         @relation("BuyerRFQs")
+  receivedRFQs  RFQ[]         @relation("SupplierRFQs")
+  providerImportDocuments ProviderImportDocument[]
+  importedProviders       ImportedProvider[]
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")
 
@@ -73,4 +81,157 @@ enum OnboardingStatus {
   PENDING
   IN_PROGRESS
   COMPLETED
+}
+
+enum VerificationStatus {
+  PENDING
+  IN_PROGRESS
+  VERIFIED
+  REJECTED
+}
+
+model Product {
+  id          String            @id @default(cuid())
+  name        String
+  description String?
+  quantity    Int               @default(0)
+  isAvailable Boolean           @default(true) @map("is_available")
+  isVisible   Boolean           @default(true) @map("is_visible")
+  companyId   String            @map("company_id")
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rfqs        RFQ[]
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  @@map("products")
+}
+
+model ERPConnection {
+  id                String   @id @default(cuid())
+  erpSystem         ERPSystem @map("erp_system")
+  connectionString  String?  @map("connection_string")
+  apiKey            String?  @map("api_key")
+  credentials       String?
+  isActive          Boolean  @default(false) @map("is_active")
+  companyId         String   @unique @map("company_id")
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("erp_connections")
+}
+
+model RFQ {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  quantity    Int?
+  status      RFQStatus  @default(PENDING)
+  buyerId     String     @map("buyer_id")
+  buyer       Company    @relation("BuyerRFQs", fields: [buyerId], references: [id], onDelete: Cascade)
+  supplierId  String     @map("supplier_id")
+  supplier    Company    @relation("SupplierRFQs", fields: [supplierId], references: [id], onDelete: Cascade)
+  productId   String?    @map("product_id")
+  product     Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  response    String?
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  @@map("rfqs")
+}
+
+enum ERPSystem {
+  SAP
+  ORACLE_NETSUITE
+  MICROSOFT_DYNAMICS_365
+}
+
+enum RFQStatus {
+  PENDING
+  REVIEWED
+  RESPONDED
+  ACCEPTED
+  REJECTED
+}
+
+model ProviderImportDocument {
+  id           String               @id @default(cuid())
+  fileName     String               @map("file_name")
+  fileSize     Int                  @map("file_size")
+  fileType     String               @map("file_type")
+  status       ProviderImportStatus @default(UPLOADED)
+  errorMessage String?              @map("error_message")
+  companyId    String               @map("company_id")
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  records      ProviderImportRecord[]
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  @@map("provider_import_documents")
+}
+
+model ProviderImportRecord {
+  id            String                 @id @default(cuid())
+  documentId    String                 @map("document_id")
+  document      ProviderImportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  companyId     String                 @map("company_id")
+  companyName   String?                @map("company_name")
+  contactPerson String?                @map("contact_person")
+  email         String?
+  phone         String?
+  address       String?
+  country       String?
+  vatId         String?                @map("vat_id")
+  website       String?
+  notes         String?
+  rawData       Json?                  @map("raw_data")
+  status        RecordImportStatus     @default(PENDING)
+  isSelected    Boolean                @default(true) @map("is_selected")
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @updatedAt @map("updated_at")
+
+  @@map("provider_import_records")
+}
+
+model ImportedProvider {
+  id               String   @id @default(cuid())
+  companyId        String   @map("company_id")
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sourceDocumentId String?  @map("source_document_id")
+  companyName      String?  @map("company_name")
+  contactPerson    String?  @map("contact_person")
+  email            String?
+  phone            String?
+  address          String?
+  country          String?
+  vatId            String?  @map("vat_id")
+  website          String?
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("imported_providers")
+}
+
+model AdminSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_settings")
+}
+
+enum ProviderImportStatus {
+  UPLOADED
+  PROCESSING
+  EXTRACTED
+  FAILED
+}
+
+enum RecordImportStatus {
+  PENDING
+  IMPORTED
+  SKIPPED
 }

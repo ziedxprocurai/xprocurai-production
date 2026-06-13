@@ -104,4 +104,51 @@ export class CompanyService {
 
     return this.findById(companyId);
   }
+
+  // Admin methods
+  async findAll() {
+    return this.prisma.company.findMany({
+      include: {
+        users: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+            isAdmin: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async updateVerificationStatus(
+    id: string,
+    status: 'PENDING' | 'IN_PROGRESS' | 'VERIFIED' | 'REJECTED',
+  ) {
+    const company = await this.prisma.company.findUnique({ where: { id } });
+    if (!company) throw new NotFoundException('Company not found');
+
+    const updated = await this.prisma.company.update({
+      where: { id },
+      data: { verificationStatus: status },
+      include: {
+        users: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    this.logger.log(
+      `Company "${company.legalName}" verification status updated to ${status}`,
+    );
+
+    return updated;
+  }
 }

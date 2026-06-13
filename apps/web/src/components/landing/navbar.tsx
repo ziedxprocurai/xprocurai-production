@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { Menu, X, Hexagon, LogOut, User, Settings, LayoutDashboard, ChevronDown } from 'lucide-react';
+import { Menu, X, Hexagon, LogOut, User, Settings, LayoutDashboard, ChevronDown, Shield } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 const navLinks = [
@@ -18,6 +18,7 @@ export function Navbar() {
   const { data: session, status } = useSession();
   const isAuthenticated = status === 'authenticated' && !!session;
   const isOnboarded = isAuthenticated && (session as any)?.user?.onboarded;
+  const isAdmin = isAuthenticated && (session as any)?.user?.isAdmin;
   const authLink = isOnboarded ? '/dashboard' : '/onboarding';
 
   useEffect(() => {
@@ -99,6 +100,16 @@ export function Navbar() {
                     >
                       <LayoutDashboard className="h-4 w-4" />
                       Dashboard
+                    </a>
+                  )}
+                  {isAdmin && (
+                    <a
+                      href="/admin"
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <Shield className="h-4 w-4" />
+                      Admin Panel
                     </a>
                   )}
                   <a
@@ -197,6 +208,16 @@ export function Navbar() {
                   >
                     <LayoutDashboard className="h-4 w-4" />
                     Dashboard
+                  </a>
+                )}
+                {isAdmin && (
+                  <a
+                    href="/admin"
+                    onClick={() => setMobileOpen(false)}
+                    className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
+                  >
+                    <Shield className="h-4 w-4" />
+                    Admin Panel
                   </a>
                 )}
                 <a

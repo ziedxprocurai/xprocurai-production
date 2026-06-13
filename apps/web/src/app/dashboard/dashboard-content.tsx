@@ -27,6 +27,12 @@ import {
   Sun,
   Moon,
   ChevronDown,
+  Shield,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  XCircle,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
 
@@ -43,12 +49,17 @@ interface Company {
   description?: string;
   roles: string[];
   onboardingStatus: string;
+  verificationStatus: string;
   users: { id: string; email: string; fullName?: string; role?: string }[];
 }
 
 const NAV_ITEMS = [
   { label: 'Home', icon: Home, href: '/dashboard' },
-  { label: 'Suppliers', icon: Package, href: '/suppliers' },
+  { label: 'Products', icon: Package, href: '/dashboard/products' },
+  { label: 'RFQs', icon: FileText, href: '/dashboard/rfqs' },
+  { label: 'ERP Integration', icon: TrendingUp, href: '/dashboard/erp' },
+  { label: 'Provider Import', icon: FileSpreadsheet, href: '/dashboard/provider-import' },
+  { label: 'Suppliers', icon: ShoppingCart, href: '/suppliers' },
   { label: 'Analytics', icon: BarChart3, href: '/analytics' },
   { label: 'Reports', icon: FileText, href: '/reports' },
   { label: 'Settings', icon: Settings, href: '/settings' },
@@ -290,15 +301,52 @@ export function DashboardContent() {
                     <Building2 className="h-5 w-5 text-[hsl(var(--primary))]" />
                     Company Profile
                   </h2>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-medium ${
-                      company?.onboardingStatus === 'COMPLETED'
-                        ? 'bg-emerald-500/10 text-emerald-500'
-                        : 'bg-amber-500/10 text-amber-500'
-                    }`}
-                  >
-                    {company?.onboardingStatus === 'COMPLETED' ? 'Active' : 'Setup in progress'}
-                  </span>
+                  <div className="flex gap-2">
+                    {company?.verificationStatus && (
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
+                          company.verificationStatus === 'VERIFIED'
+                            ? 'bg-emerald-500/10 text-emerald-500'
+                            : company.verificationStatus === 'IN_PROGRESS'
+                              ? 'bg-blue-500/10 text-blue-500'
+                              : company.verificationStatus === 'REJECTED'
+                                ? 'bg-red-500/10 text-red-500'
+                                : 'bg-amber-500/10 text-amber-500'
+                        }`}
+                      >
+                        {company.verificationStatus === 'VERIFIED' ? (
+                          <>
+                            <CheckCircle className="h-3 w-3" />
+                            Verified
+                          </>
+                        ) : company.verificationStatus === 'IN_PROGRESS' ? (
+                          <>
+                            <AlertCircle className="h-3 w-3" />
+                            Verification in Progress
+                          </>
+                        ) : company.verificationStatus === 'REJECTED' ? (
+                          <>
+                            <XCircle className="h-3 w-3" />
+                            Rejected
+                          </>
+                        ) : (
+                          <>
+                            <Clock className="h-3 w-3" />
+                            Pending Verification
+                          </>
+                        )}
+                      </span>
+                    )}
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-medium ${
+                        company?.onboardingStatus === 'COMPLETED'
+                          ? 'bg-emerald-500/10 text-emerald-500'
+                          : 'bg-amber-500/10 text-amber-500'
+                      }`}
+                    >
+                      {company?.onboardingStatus === 'COMPLETED' ? 'Active' : 'Setup in progress'}
+                    </span>
+                  </div>
                 </div>
 
                 {company ? (

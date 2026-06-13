@@ -7,6 +7,7 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
+  isAdmin: boolean;
 }
 
 export interface GoogleProfile {
@@ -52,7 +53,7 @@ export class AuthService {
       });
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    const tokens = await this.generateTokens(user.id, user.email, user.role, user.isAdmin);
 
     return {
       user: {
@@ -62,13 +63,14 @@ export class AuthService {
         avatarUrl: user.avatarUrl,
         role: user.role,
         onboarded: user.onboarded,
+        isAdmin: user.isAdmin,
       },
       ...tokens,
     };
   }
 
-  async generateTokens(userId: string, email: string, role: string = 'USER') {
-    const payload: JwtPayload = { sub: userId, email, role };
+  async generateTokens(userId: string, email: string, role: string = 'USER', isAdmin: boolean = false) {
+    const payload: JwtPayload = { sub: userId, email, role, isAdmin };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload),
@@ -103,6 +105,7 @@ export class AuthService {
       avatarUrl: user.avatarUrl,
       role: user.role,
       onboarded: user.onboarded,
+      isAdmin: user.isAdmin,
     };
   }
 }
