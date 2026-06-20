@@ -37,7 +37,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@netlify/plugin-nextjs": "^5.0.0",
+    "@netlify/plugin-nextjs": "^5.15.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/bcrypt": "^5.0.0",
     "@types/node": "^22.0.0",
