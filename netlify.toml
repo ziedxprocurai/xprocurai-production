@@ -1,6 +1,9 @@
+# Netlify configuration for xProcurAI monorepo
+# Build from repo root to handle workspace dependencies
+
 [build]
-  command = "npm install && npx prisma generate && npm run build"
-  publish = ".next"
+  command = "npm install && cd apps/web && npx prisma generate && npm run build"
+  publish = "apps/web/.next"
 
 [build.environment]
   NODE_VERSION = "22"
@@ -8,18 +11,6 @@
 # Next.js on Netlify plugin
 [[plugins]]
   package = "@netlify/plugin-nextjs"
-
-# Environment variables that must be set in Netlify UI:
-# - DATABASE_URL (Supabase pooled connection string)
-# - DIRECT_DATABASE_URL (Supabase direct connection string)
-# - NEXTAUTH_SECRET
-# - NEXTAUTH_URL (https://your-production-domain.com)
-# - GOOGLE_CLIENT_ID
-# - GOOGLE_CLIENT_SECRET
-# - NEXT_PUBLIC_APP_URL (https://your-production-domain.com)
-# - NEXT_PUBLIC_APP_NAME (xProcurAI)
-# - JWT_SECRET
-# - JWT_REFRESH_SECRET
 
 # Headers for security
 [[headers]]
@@ -38,7 +29,6 @@
     Cache-Control = "public, max-age=31536000, immutable"
 
 # Redirects are handled automatically by @netlify/plugin-nextjs
-
 [[redirects]]
   from = "/*"
   to = "/.netlify/builders/___netlify-server-handler"
