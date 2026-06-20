@@ -1,68 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
-  let accessToken: string | null = null;
-  try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
-    });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
-    }
-  } catch (err) {
-    console.error('[api/rfqs] Backend sync failed:', err);
-  }
-
-  if (!accessToken) {
+  if (!user.company) {
     return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
+      { message: 'User must belong to a company to create RFQs' },
+      { status: 403 },
     );
   }
 
   try {
     const body = await req.json();
-    const res = await fetch(`${apiUrl}/rfqs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const { title, description, quantity, supplierId, productId } = body;
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
+    if (!title || !supplierId) {
       return NextResponse.json(
-        data || { message: 'Failed to create RFQ' },
-        { status: res.status },
+        { message: 'Title and supplierId are required' },
+        { status: 400 },
       );
     }
 
-    return NextResponse.json(data);
+    const rfq = await prisma.rFQ.create({
+      data: {
+        title,
+        description: description || null,
+        quantity: quantity || null,
+        buyerId: user.company.id,
+        supplierId,
+        productId: productId || null,
+      },
+      include: {
+        buyer: { select: { id: true, legalName: true } },
+        supplier: { select: { id: true, legalName: true } },
+        product: { select: { id: true, name: true } },
+      },
+    });
+
+    return NextResponse.json(rfq);
   } catch (err) {
-    console.error('[api/rfqs] Request failed:', err);
+    console.error('[api/rfqs] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Failed to create RFQ' },
+      { status: 500 },
     );
   }
 }

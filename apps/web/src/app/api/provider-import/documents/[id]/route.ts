@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
-import { getBackendToken } from '@/lib/backend-token';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
@@ -8,40 +8,34 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
+  }
+
+  if (!user.company) {
+    return NextResponse.json({ message: 'User must belong to a company.' }, { status: 403 });
   }
 
   const { id } = await params;
 
-  const accessToken = await getBackendToken(
-    session.user.email,
-    session.user.name || '',
-    session.user.image || '',
-  );
-
-  if (!accessToken) {
-    return NextResponse.json({ message: 'Failed to authenticate with backend API' }, { status: 502 });
-  }
-
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
   try {
-    const res = await fetch(`${apiUrl}/provider-import/documents/${id}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const document = await prisma.providerImportDocument.findFirst({
+      where: { id, companyId: user.company.id },
+      include: {
+        records: { orderBy: { createdAt: 'asc' } },
+        _count: { select: { records: true } },
+      },
     });
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      return NextResponse.json(data || { message: 'Failed to fetch document' }, { status: res.status });
+    if (!document) {
+      return NextResponse.json({ message: 'Document not found.' }, { status: 404 });
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(document);
   } catch (err) {
     console.error('[api/provider-import/documents/[id] GET]', err);
-    return NextResponse.json({ message: 'Failed to connect to backend API' }, { status: 502 });
+    return NextResponse.json({ message: 'Failed to fetch document' }, { status: 500 });
   }
 }
 
@@ -49,40 +43,31 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
+  }
+
+  if (!user.company) {
+    return NextResponse.json({ message: 'User must belong to a company.' }, { status: 403 });
   }
 
   const { id } = await params;
 
-  const accessToken = await getBackendToken(
-    session.user.email,
-    session.user.name || '',
-    session.user.image || '',
-  );
-
-  if (!accessToken) {
-    return NextResponse.json({ message: 'Failed to authenticate with backend API' }, { status: 502 });
-  }
-
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
   try {
-    const res = await fetch(`${apiUrl}/provider-import/documents/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const document = await prisma.providerImportDocument.findFirst({
+      where: { id, companyId: user.company.id },
     });
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      return NextResponse.json(data || { message: 'Failed to delete document' }, { status: res.status });
+    if (!document) {
+      return NextResponse.json({ message: 'Document not found.' }, { status: 404 });
     }
 
-    return NextResponse.json(data);
+    await prisma.providerImportDocument.delete({ where: { id } });
+
+    return NextResponse.json({ message: 'Document deleted successfully.' });
   } catch (err) {
     console.error('[api/provider-import/documents/[id] DELETE]', err);
-    return NextResponse.json({ message: 'Failed to connect to backend API' }, { status: 502 });
+    return NextResponse.json({ message: 'Failed to delete document' }, { status: 500 });
   }
 }

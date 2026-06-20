@@ -1,126 +1,76 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
-  let accessToken: string | null = null;
-  try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
-    });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
-    }
-  } catch (err) {
-    console.error('[api/products] Backend sync failed:', err);
-  }
-
-  if (!accessToken) {
-    return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
-    );
+  if (!user.company) {
+    return NextResponse.json([], { status: 200 });
   }
 
   try {
-    const res = await fetch(`${apiUrl}/products`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const products = await prisma.product.findMany({
+      where: { companyId: user.company.id },
+      orderBy: { createdAt: 'desc' },
     });
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      return NextResponse.json(
-        data || { message: 'Failed to fetch products' },
-        { status: res.status },
-      );
-    }
-
-    return NextResponse.json(data);
+    return NextResponse.json(products);
   } catch (err) {
-    console.error('[api/products] Request failed:', err);
+    console.error('[api/products] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Failed to fetch products' },
+      { status: 500 },
     );
   }
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
-  let accessToken: string | null = null;
-  try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
-    });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
-    }
-  } catch (err) {
-    console.error('[api/products] Backend sync failed:', err);
-  }
-
-  if (!accessToken) {
+  if (!user.company) {
     return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
+      { message: 'User must belong to a company to create products' },
+      { status: 403 },
     );
   }
 
   try {
     const body = await req.json();
-    const res = await fetch(`${apiUrl}/products`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const { name, description, quantity, isAvailable, isVisible } = body;
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
+    if (!name) {
       return NextResponse.json(
-        data || { message: 'Failed to create product' },
-        { status: res.status },
+        { message: 'Product name is required' },
+        { status: 400 },
       );
     }
 
-    return NextResponse.json(data);
+    const product = await prisma.product.create({
+      data: {
+        name,
+        description: description || null,
+        quantity: quantity || 0,
+        isAvailable: isAvailable ?? true,
+        isVisible: isVisible ?? true,
+        companyId: user.company.id,
+      },
+    });
+
+    return NextResponse.json(product);
   } catch (err) {
-    console.error('[api/products] Request failed:', err);
+    console.error('[api/products] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Failed to create product' },
+      { status: 500 },
     );
   }
 }

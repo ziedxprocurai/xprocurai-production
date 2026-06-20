@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
@@ -8,128 +9,77 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+  if (!user.company) {
+    return NextResponse.json({ message: 'User must belong to a company' }, { status: 403 });
+  }
 
-  let accessToken: string | null = null;
   try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
+    const product = await prisma.product.findFirst({
+      where: { id, companyId: user.company.id },
     });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
+
+    if (!product) {
+      return NextResponse.json({ message: 'Product not found' }, { status: 404 });
     }
-  } catch (err) {
-    console.error('[api/products/[id]] Backend sync failed:', err);
-  }
 
-  if (!accessToken) {
-    return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
-    );
-  }
-
-  try {
     const body = await req.json();
-    const res = await fetch(`${apiUrl}/products/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
+    const updated = await prisma.product.update({
+      where: { id },
+      data: {
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.description !== undefined && { description: body.description }),
+        ...(body.quantity !== undefined && { quantity: body.quantity }),
+        ...(body.isAvailable !== undefined && { isAvailable: body.isAvailable }),
+        ...(body.isVisible !== undefined && { isVisible: body.isVisible }),
       },
-      body: JSON.stringify(body),
     });
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      return NextResponse.json(
-        data || { message: 'Failed to update product' },
-        { status: res.status },
-      );
-    }
-
-    return NextResponse.json(data);
+    return NextResponse.json(updated);
   } catch (err) {
-    console.error('[api/products/[id]] Request failed:', err);
+    console.error('[api/products/[id]] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Failed to update product' },
+      { status: 500 },
     );
   }
 }
 
 export async function DELETE(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
-  let accessToken: string | null = null;
-  try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
-    });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
-    }
-  } catch (err) {
-    console.error('[api/products/[id]] Backend sync failed:', err);
-  }
-
-  if (!accessToken) {
-    return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
-    );
+  if (!user.company) {
+    return NextResponse.json({ message: 'User must belong to a company' }, { status: 403 });
   }
 
   try {
-    const res = await fetch(`${apiUrl}/products/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const product = await prisma.product.findFirst({
+      where: { id, companyId: user.company.id },
     });
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      return NextResponse.json(
-        data || { message: 'Failed to delete product' },
-        { status: res.status },
-      );
+    if (!product) {
+      return NextResponse.json({ message: 'Product not found' }, { status: 404 });
     }
 
-    return NextResponse.json(data);
+    await prisma.product.delete({ where: { id } });
+
+    return NextResponse.json({ message: 'Product deleted successfully' });
   } catch (err) {
-    console.error('[api/products/[id]] Request failed:', err);
+    console.error('[api/products/[id]] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Failed to delete product' },
+      { status: 500 },
     );
   }
 }

@@ -1,65 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
   const query = searchParams.get('q') || '';
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
-  let accessToken: string | null = null;
   try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
-    });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
-    }
-  } catch (err) {
-    console.error('[api/products/search] Backend sync failed:', err);
-  }
-
-  if (!accessToken) {
-    return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
-    );
-  }
-
-  try {
-    const res = await fetch(`${apiUrl}/products/search?q=${encodeURIComponent(query)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const products = await prisma.product.findMany({
+      where: {
+        isVisible: true,
+        isAvailable: true,
+        ...(query && {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' } },
+            { description: { contains: query, mode: 'insensitive' } },
+          ],
+        }),
+      },
+      include: {
+        company: { select: { id: true, legalName: true, country: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
     });
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      return NextResponse.json(
-        data || { message: 'Failed to search products' },
-        { status: res.status },
-      );
-    }
-
-    return NextResponse.json(data);
+    return NextResponse.json(products);
   } catch (err) {
-    console.error('[api/products/search] Request failed:', err);
+    console.error('[api/products/search] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Failed to search products' },
+      { status: 500 },
     );
   }
 }

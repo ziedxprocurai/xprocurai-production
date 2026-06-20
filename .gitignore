@@ -39,7 +39,7 @@ npm-debug.log*
 
 # Prisma
 apps/api/prisma/*.db
-apps/api/prisma/migrations/
+apps/web/prisma/*.db
 
 # PM2
 ecosystem.config.js.bak
@@ -48,3 +48,6 @@ ecosystem.config.js.bak
 # Deployment
 deploy/*.local
 deploy/*.secret
+
+# Netlify
+.netlify/

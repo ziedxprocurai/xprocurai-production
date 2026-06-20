@@ -1,41 +1,34 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
-import { getBackendToken } from '@/lib/backend-token';
+import { requireAdmin } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
-  }
-
-  if (!(session as any).user?.isAdmin) {
+  const admin = await requireAdmin();
+  if (!admin) {
     return NextResponse.json({ message: 'Admin access required' }, { status: 403 });
   }
 
-  const accessToken = await getBackendToken(
-    session.user.email,
-    session.user.name || '',
-    session.user.image || '',
-  );
-
-  if (!accessToken) {
-    return NextResponse.json({ message: 'Failed to authenticate with backend API' }, { status: 502 });
-  }
-
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
   try {
-    const res = await fetch(`${apiUrl}/admin/settings/provider-import/test`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const setting = await prisma.adminSetting.findUnique({
+      where: { key: 'PROVIDER_IMPORT_AI_API_KEY' },
     });
 
-    const data = await res.json().catch(() => null);
+    if (!setting?.value) {
+      return NextResponse.json({ success: false, message: 'No API key configured.' });
+    }
 
-    return NextResponse.json(data ?? { success: false, message: 'Unknown error' });
-  } catch (err) {
-    console.error('[api/admin/provider-import-settings/test GET]', err);
-    return NextResponse.json({ success: false, message: 'Failed to connect to backend API' }, { status: 502 });
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(setting.value);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    await model.generateContent('Reply with the word OK only.');
+
+    return NextResponse.json({ success: true, message: 'Gemini API key is valid and working.' });
+  } catch (err: any) {
+    return NextResponse.json({
+      success: false,
+      message: err.message || 'Gemini API key validation failed.',
+    });
   }
 }

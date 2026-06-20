@@ -360,7 +360,9 @@ export function SuppliersContent() {
                         {product.name}
                       </h3>
                       {product.company.verificationStatus === 'VERIFIED' && (
-                        <CheckCircle className="h-5 w-5 flex-shrink-0 text-emerald-500" title="Verified Supplier" />
+                        <div title="Verified Supplier">
+                          <CheckCircle className="h-5 w-5 flex-shrink-0 text-emerald-500" />
+                        </div>
                       )}
                     </div>
                     {product.description && (

@@ -1,46 +1,31 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
-import { getBackendToken } from '@/lib/backend-token';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
+  }
+
+  if (!user.company) {
+    return NextResponse.json([], { status: 200 });
+  }
+
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = await getBackendToken(
-      session.user.email,
-      session.user.name || '',
-      session.user.image || '',
-    );
-    
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const res = await fetch(`${API_URL}/provider-import/imported-providers`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+    const providers = await prisma.importedProvider.findMany({
+      where: { companyId: user.company.id },
+      orderBy: { createdAt: 'desc' },
     });
 
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: 'Failed to fetch imported providers' }));
-      return NextResponse.json(error, { status: res.status });
-    }
-
-    const data = await res.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('[imported-providers] Error:', error);
+    return NextResponse.json(providers);
+  } catch (err) {
+    console.error('[imported-providers] Error:', err);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { message: 'Failed to fetch imported providers' },
+      { status: 500 },
     );
   }
 }

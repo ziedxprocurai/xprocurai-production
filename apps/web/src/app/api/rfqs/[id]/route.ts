@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
@@ -8,65 +9,54 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
-  let accessToken: string | null = null;
-  try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
-    });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
-    }
-  } catch (err) {
-    console.error('[api/rfqs/[id]] Backend sync failed:', err);
-  }
-
-  if (!accessToken) {
+  if (!user.company) {
     return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
+      { message: 'User must belong to a company' },
+      { status: 403 },
     );
   }
 
   try {
     const body = await req.json();
-    const res = await fetch(`${apiUrl}/rfqs/${id}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
+
+    const rfq = await prisma.rFQ.findFirst({
+      where: {
+        id,
+        OR: [
+          { buyerId: user.company.id },
+          { supplierId: user.company.id },
+        ],
       },
-      body: JSON.stringify(body),
     });
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      return NextResponse.json(
-        data || { message: 'Failed to update RFQ' },
-        { status: res.status },
-      );
+    if (!rfq) {
+      return NextResponse.json({ message: 'RFQ not found' }, { status: 404 });
     }
 
-    return NextResponse.json(data);
+    const updated = await prisma.rFQ.update({
+      where: { id },
+      data: {
+        ...(body.status && { status: body.status }),
+        ...(body.response !== undefined && { response: body.response }),
+      },
+      include: {
+        buyer: { select: { id: true, legalName: true } },
+        supplier: { select: { id: true, legalName: true } },
+        product: { select: { id: true, name: true } },
+      },
+    });
+
+    return NextResponse.json(updated);
   } catch (err) {
-    console.error('[api/rfqs/[id]] Request failed:', err);
+    console.error('[api/rfqs/[id]] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Failed to update RFQ' },
+      { status: 500 },
     );
   }
 }

@@ -1,85 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
-  // Always get a fresh backend token for the request
-  let accessToken: string | null = null;
-  try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
-    });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
-    } else {
-      console.error('[api/companies] /auth/google returned:', syncRes.status);
-    }
-  } catch (err) {
-    console.error('[api/companies] Backend sync failed:', err);
-  }
-
-  if (!accessToken) {
+  if (user.companyId) {
     return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
+      { message: 'User already belongs to a company' },
+      { status: 409 },
     );
   }
 
-  // Forward the company creation request to the backend
   try {
     const body = await req.json();
-    const res = await fetch(`${apiUrl}/companies`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const { legalName, website, country, city, industry, companySize, phoneNumber, email, description, roles } = body;
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      console.error('[api/companies] Backend returned:', res.status, data);
+    if (!legalName || !country) {
       return NextResponse.json(
-        data || { message: 'Failed to create company' },
-        { status: res.status },
+        { message: 'legalName and country are required' },
+        { status: 400 },
       );
     }
 
-    // Complete onboarding for the newly created company
-    if (data?.id) {
-      try {
-        await fetch(`${apiUrl}/companies/${data.id}/complete-onboarding`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-      } catch {
-        // Non-critical — onboarding status can be updated later
-      }
-    }
+    const company = await prisma.company.create({
+      data: {
+        legalName,
+        website: website || null,
+        country,
+        city: city || null,
+        industry: industry || null,
+        companySize: companySize || null,
+        phoneNumber: phoneNumber || null,
+        email: email || null,
+        description: description || null,
+        roles: roles || ['BUYER'],
+        onboardingStatus: 'COMPLETED',
+        users: { connect: { id: user.id } },
+      },
+      include: {
+        users: { select: { id: true, email: true, fullName: true } },
+      },
+    });
 
-    return NextResponse.json(data);
+    // Mark user as onboarded
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { onboarded: true },
+    });
+
+    return NextResponse.json(company);
   } catch (err) {
-    console.error('[api/companies] Request failed:', err);
+    console.error('[api/companies] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Failed to create company' },
+      { status: 500 },
     );
   }
 }

@@ -1,68 +1,39 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-auth';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.email) {
+  const user = await getAuthenticatedUser();
+  if (!user) {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-
-  // Get a backend access token
-  let accessToken: string | null = null;
-  try {
-    const syncRes = await fetch(`${apiUrl}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.user.email,
-        fullName: session.user.name || '',
-        avatarUrl: session.user.image || '',
-      }),
-    });
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      accessToken = data.accessToken;
-    }
-  } catch (err) {
-    console.error('[api/companies/me] Backend sync failed:', err);
+  if (!user.companyId) {
+    return NextResponse.json(null, { status: 200 });
   }
 
-  if (!accessToken) {
-    return NextResponse.json(
-      { message: 'Failed to authenticate with backend API' },
-      { status: 502 },
-    );
-  }
-
-  // Fetch the user's company
   try {
-    const res = await fetch(`${apiUrl}/companies/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const company = await prisma.company.findUnique({
+      where: { id: user.companyId },
+      include: {
+        users: {
+          select: { id: true, email: true, fullName: true, role: true },
+        },
+      },
     });
 
-    if (res.status === 404) {
+    if (!company) {
       return NextResponse.json(null, { status: 200 });
     }
 
-    const data = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      return NextResponse.json(
-        data || { message: 'Failed to fetch company' },
-        { status: res.status },
-      );
-    }
-
-    return NextResponse.json(data);
+    return NextResponse.json(company);
   } catch (err) {
-    console.error('[api/companies/me] Request failed:', err);
+    console.error('[api/companies/me] Database error:', err);
     return NextResponse.json(
-      { message: 'Failed to connect to backend API' },
-      { status: 502 },
+      { message: 'Internal server error' },
+      { status: 500 },
     );
   }
 }
