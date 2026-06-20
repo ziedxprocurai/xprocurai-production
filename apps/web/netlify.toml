@@ -1,9 +1,9 @@
 [build]
-  command = "npm install && npx prisma generate && npm run build"
+  command = "cd ../.. && npm install && cd apps/web && npx prisma generate && npm run build"
   publish = ".next"
 
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
 
 # Next.js on Netlify plugin
 [[plugins]]
