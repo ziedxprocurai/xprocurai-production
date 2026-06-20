@@ -7,6 +7,7 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  AUTH_TRUST_HOST = "true"
 
 # Next.js on Netlify plugin
 [[plugins]]
