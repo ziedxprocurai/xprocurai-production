@@ -51,3 +51,4 @@ deploy/*.secret
 
 # Netlify
 .netlify/
+NETLIFY-DEPLOYMENT-GUIDE.md
