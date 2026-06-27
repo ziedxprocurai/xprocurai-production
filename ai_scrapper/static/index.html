@@ -1,0 +1,1158 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Procurement Platform</title>
+  <style>
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+      animation-duration: 0.25s;
+      animation-timing-function: cubic-bezier(0.19, 1, 0.22, 1);
+    }
+
+    :root {
+      color-scheme: dark;
+      --bg: #070a0f;
+      --panel: #0d1320;
+      --panel-2: #111a2b;
+      --line: rgba(148, 163, 184, 0.18);
+      --text: #e5eefc;
+      --muted: #8fa0b8;
+      --blue: #58a6ff;
+      --cyan: #22d3ee;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #fb7185;
+      --purple: #a78bfa;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+      --radius: 18px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 20% -10%, rgba(88, 166, 255, 0.22), transparent 32rem),
+        radial-gradient(circle at 90% 0%, rgba(34, 211, 238, 0.13), transparent 28rem),
+        linear-gradient(180deg, #070a0f 0%, #090d14 50%, #05070b 100%);
+      color: var(--text);
+    }
+
+    button, input, textarea, select { font: inherit; }
+    .app { width: min(1480px, calc(100% - 40px)); margin: 0 auto; padding: 32px 0; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; margin-bottom: 24px; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid rgba(88, 166, 255, 0.28); border-radius: 999px; color: #b8d8ff; background: rgba(88, 166, 255, 0.08); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+    h1 { margin: 14px 0 8px; font-size: clamp(30px, 5vw, 58px); line-height: 0.95; letter-spacing: -0.055em; }
+    .subtitle { max-width: 860px; margin: 0; color: var(--muted); font-size: 16px; line-height: 1.7; }
+    .status-pill { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 999px; background: rgba(13, 19, 32, 0.72); box-shadow: var(--shadow); color: var(--muted); white-space: nowrap; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 6px rgba(143, 160, 184, 0.08); }
+    .dot.live { background: var(--green); box-shadow: 0 0 0 6px rgba(52, 211, 153, 0.12), 0 0 24px rgba(52, 211, 153, 0.35); }
+
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .tab { border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,0.04); color: #c8d6e8; padding: 10px 14px; cursor: pointer; }
+    .tab.active { color: #03111d; background: linear-gradient(135deg, var(--cyan), var(--blue)); border-color: transparent; font-weight: 800; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .layout { display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: 18px; align-items: start; }
+    .panel { border: 1px solid var(--line); border-radius: var(--radius); background: linear-gradient(180deg, rgba(17, 26, 43, 0.94), rgba(10, 15, 25, 0.94)); box-shadow: var(--shadow); overflow: hidden; }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.025); }
+    .panel-title { margin: 0; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: #d7e5f8; }
+    .panel-body { padding: 18px; }
+    .field { margin-bottom: 16px; }
+    label { display: block; margin-bottom: 8px; color: #b7c6db; font-size: 13px; }
+    input, textarea, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 12px; background: rgba(3, 7, 18, 0.62); color: var(--text); padding: 12px 13px; outline: none; }
+    textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
+    input:focus, textarea:focus, select:focus { border-color: rgba(88, 166, 255, 0.72); box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.12); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .checks { display: grid; gap: 10px; margin: 10px 0 18px; }
+    .check { display: flex; align-items: center; gap: 10px; color: #c8d6e8; font-size: 14px; }
+    .check input { width: 16px; height: 16px; accent-color: var(--blue); }
+    .primary, .secondary { border-radius: 14px; padding: 12px 15px; cursor: pointer; font-weight: 800; }
+    .primary { width: 100%; border: 0; color: #03111d; background: linear-gradient(135deg, var(--cyan), var(--blue)); box-shadow: 0 16px 40px rgba(34, 211, 238, 0.18); }
+    .primary:disabled { cursor: not-allowed; opacity: 0.58; box-shadow: none; }
+    .secondary { border: 1px solid rgba(148, 163, 184, 0.24); color: #c8d6e8; background: rgba(255, 255, 255, 0.04); }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+    .metric { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255, 255, 255, 0.035); }
+    .metric-value { font-size: 28px; font-weight: 850; letter-spacing: -0.04em; }
+    .metric-label { margin-top: 4px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .section-title { margin: 0 0 12px; font-size: 15px; color: #d7e5f8; letter-spacing: 0.04em; text-transform: uppercase; }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+    .summary-card, .offer-card, .supplier-card { padding: 14px; border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 16px; background: rgba(255, 255, 255, 0.035); }
+    .summary-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .summary-value { margin-top: 6px; color: #e8f1ff; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+    .supplier-card { display: grid; gap: 10px; margin-bottom: 12px; }
+    .supplier-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+    .offer-table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; }
+    .offer-table th, .offer-table td { padding: 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.12); text-align: left; vertical-align: top; font-size: 13px; }
+    .offer-table th { color: #d7e5f8; background: rgba(255,255,255,0.04); text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; }
+    .offer-table tr:last-child td { border-bottom: 0; }
+    .raw-json { margin-top: 18px; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.72); display: none; align-items: center; justify-content: center; z-index: 50; padding: 24px; }
+    .modal-backdrop.show { display: flex; }
+    .modal { width: min(980px, 100%); max-height: 90vh; overflow: auto; border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 22px; background: #0d1320; box-shadow: 0 30px 120px rgba(0,0,0,0.65); }
+    .modal-header { position: sticky; top: 0; display: flex; justify-content: space-between; gap: 16px; align-items: start; padding: 18px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); background: rgba(13, 19, 32, 0.96); backdrop-filter: blur(10px); z-index: 1; }
+    .modal-body { padding: 18px; }
+    .modal-close { border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 999px; background: rgba(255,255,255,0.04); color: #c8d6e8; padding: 8px 12px; cursor: pointer; }
+    .main-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 0.8fr); gap: 18px; }
+    .json { width: 100%; min-height: 260px; margin: 0; padding: 16px; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 14px; background: rgba(3, 7, 18, 0.5); color: #c7e9ff; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 12px; line-height: 1.55; overflow: auto; white-space: pre-wrap; }
+    .events { height: 430px; overflow: auto; padding: 0; margin: 0; list-style: none; background: rgba(3, 7, 18, 0.36); }
+    .event { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.12); }
+    .event-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .event-kind { color: #dce8f7; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+    .event-detail { color: var(--muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .contact-list, .card-list { display: grid; gap: 10px; max-height: 420px; overflow: auto; padding-right: 4px; }
+    .contact-card, .result-card { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 14px; background: rgba(255, 255, 255, 0.035); }
+    .contact-value { font-family: "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; color: #e8f1ff; font-size: 13px; }
+    .contact-meta { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .score-bar { height: 7px; border-radius: 999px; background: rgba(148, 163, 184, 0.18); overflow: hidden; }
+    .score-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--red), var(--amber), var(--green)); }
+    .check-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+    .mini-badge, .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+    .mini-badge { border: 1px solid rgba(148, 163, 184, 0.16); color: #c8d6e8; background: rgba(255, 255, 255, 0.035); }
+    .badge.high, .badge.valid, .badge.completed, .badge.low { color: #bbf7d0; background: rgba(52, 211, 153, 0.13); border: 1px solid rgba(52, 211, 153, 0.28); }
+    .badge.medium, .badge.unknown, .badge.likely, .badge.uncertain, .badge.risky { color: #fde68a; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.28); }
+    .badge.rejected, .badge.failed, .badge.error { color: #fecdd3; background: rgba(251, 113, 133, 0.12); border: 1px solid rgba(251, 113, 133, 0.28); }
+    .muted { color: var(--muted); }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 8px; }
+
+    @media (max-width: 1100px) { .hero, .layout, .main-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px) { .app { width: min(100% - 24px, 1480px); padding: 20px 0; } .metrics, .grid-2 { grid-template-columns: 1fr; } .event { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">AI-native procurement engine</div>
+        <h1>Procurement AI Platform</h1>
+        <p class="subtitle">RFQ understanding, supplier discovery, semantic supplier matching, quote parsing, quote comparison, risk rules, fraud checks and reporting. Scraped suppliers are saved into SQLite and reused for RFQ matching.</p>
+      </div>
+      <div class="status-pill"><span class="dot" id="statusDot"></span><span id="statusText">Ready</span></div>
+    </section>
+
+    <section class="tabs">
+      <button class="tab active" data-tab="workflow">AI Workflow</button>
+      <button class="tab" data-tab="crawler">Supplier Discovery</button>
+      <button class="tab" data-tab="quotes">Quotes & Risk</button>
+      <button class="tab" data-tab="chat">AI Copilot</button>
+    </section>
+
+    <section id="workflow" class="tab-panel active">
+      <div class="layout">
+        <aside class="panel">
+          <div class="panel-header"><h2 class="panel-title">AI workflow</h2></div>
+          <div class="panel-body">
+            <form id="workflowForm">
+              <div class="field">
+                <label for="needText">Need / PR / RFQ text</label>
+                <textarea id="needText">I need 500 ergonomic office chairs in Tunis, budget 12000 TND, delivery within 15 days. Chairs must be black, ISO certified supplier preferred.</textarea>
+              </div>
+              <div class="field">
+                <label for="uploadFile">Upload image or PDF (optional)</label>
+                <input id="uploadFile" type="file" accept="image/*,.pdf">
+                <img id="uploadPreview" style="max-width: 100%; max-height: 200px; border-radius: 12px; margin-top: 10px; display: none; border: 1px solid var(--line);">
+                <div id="uploadFileName" class="hint"></div>
+              </div>
+              <div class="grid-2">
+                <div class="field"><label for="topK">Top suppliers</label><input id="topK" type="number" min="1" max="10" value="5"></div>
+                <div class="field"><label for="useLlm">Use OpenAI-compatible LLM</label><select id="useLlm"><option value="false">No, deterministic extractor</option><option value="true">Yes, if API key exists</option></select></div>
+              </div>
+              <div class="field">
+                <label for="suppliersJson">Suppliers JSON optional</label>
+                <textarea id="suppliersJson" placeholder='[{"name":"Tunis Office Solutions","city":"Tunis","categories":["office furniture"],"capabilities":["office chairs"],"certifications":["ISO 9001"],"contacts":{"emails":["contact@example.tn"]}}]'></textarea>
+              </div>
+              <div class="field">
+                <label for="quotesText">Quotes text optional</label>
+                <textarea id="quotesText" placeholder="Supplier A&#10;Chaise bureau ergonomique 500 pcs 22 TND&#10;Livraison 12 jours&#10;Total HT: 11000 TND"></textarea>
+              </div>
+              <button class="primary" id="runWorkflowBtn" type="submit">Run AI workflow</button>
+            </form>
+          </div>
+        </aside>
+        <section>
+          <div class="metrics">
+            <div class="metric"><div class="metric-value" id="metricItems">0</div><div class="metric-label">RFQ items</div></div>
+            <div class="metric"><div class="metric-value" id="metricSuppliers">0</div><div class="metric-label">Matches</div></div>
+            <div class="metric"><div class="metric-value" id="metricQuotes">0</div><div class="metric-label">Quotes</div></div>
+            <div class="metric"><div class="metric-value" id="metricRisk">0</div><div class="metric-label">Risk</div></div>
+          </div>
+          <div id="workflowSummary"></div>
+          <div id="ragContext"></div>
+          <div id="supplierMatches"></div>
+          <div id="quoteComparisons"></div>
+          <article class="panel raw-json"><div class="panel-header"><h2 class="panel-title">JSON brut</h2></div><div class="panel-body"><pre class="json" id="workflowOutput">// Run the AI workflow to see structured results.</pre></div></article>
+          <div style="margin-top: 18px;" class="main-grid">
+            <article class="panel"><div class="panel-header"><h2 class="panel-title">Risk flags</h2></div><div class="panel-body"><div class="card-list" id="riskList"><div class="muted">No risk assessment yet.</div></div></div></article>
+            <article class="panel"><div class="panel-header"><h2 class="panel-title">Executive summary</h2></div><div class="panel-body"><div class="card-list" id="executiveSummary"><div class="muted">No summary yet.</div></div></div></article>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="crawler" class="tab-panel">
+      <div class="layout">
+        <aside class="panel">
+          <div class="panel-header"><h2 class="panel-title">Supplier discovery crawler</h2></div>
+          <div class="panel-body">
+            <form id="crawlForm">
+              <div class="field"><label for="url">URL cible</label><input id="url" value="https://www.python.org" placeholder="https://example.com" required></div>
+              <div class="grid-2">
+                <div class="field"><label for="maxPages">Pages max</label><input id="maxPages" type="number" min="1" max="50" value="5"></div>
+                <div class="field"><label for="delaySeconds">Délai page</label><input id="delaySeconds" type="number" min="0" step="0.1" value="0.3"></div>
+              </div>
+              <div class="grid-2">
+                <div class="field"><label for="region">Région téléphone</label><input id="region" value="TN"></div>
+                <div class="field"><label for="timeoutSeconds">Timeout</label><input id="timeoutSeconds" type="number" min="5" max="60" value="20"></div>
+              </div>
+              <div class="checks">
+                <label class="check"><input id="sameDomain" type="checkbox" checked> Même domaine uniquement</label>
+                <label class="check"><input id="verifyContacts" type="checkbox" checked> Vérifier contacts</label>
+                <label class="check"><input id="smtpVerify" type="checkbox" checked> SMTP mailbox probe</label>
+                <label class="check"><input id="deepEmailVerify" type="checkbox" checked> DNS deep check + catch-all</label>
+              </div>
+              <button class="primary" id="startBtn" type="submit">Lancer la découverte fournisseur</button>
+            </form>
+          </div>
+        </aside>
+        <section>
+          <div class="main-grid">
+            <article class="panel"><div class="panel-header"><h2 class="panel-title">Crawl events</h2><span class="muted" id="eventCount">0 événements</span></div><ul class="events" id="events"></ul></article>
+            <article class="panel"><div class="panel-header"><h2 class="panel-title">Verified contacts</h2></div><div class="panel-body"><div class="contact-list" id="contactResults"><div class="muted">No crawl yet.</div></div></div></article>
+          </div>
+          <article class="panel" style="margin-top:18px;"><div class="panel-header"><h2 class="panel-title">Crawl JSON</h2><button class="secondary" id="addSuppliersFromCrawlBtn" type="button" disabled>Add as suppliers</button></div><div class="panel-body"><pre class="json" id="crawlOutput">// Crawl result will appear here.</pre></div></article>
+        </section>
+      </div>
+    </section>
+
+    <section id="quotes" class="tab-panel">
+      <div class="layout">
+        <aside class="panel">
+          <div class="panel-header"><h2 class="panel-title">Quotes parser</h2></div>
+          <div class="panel-body">
+            <div class="field"><label for="quoteInput">Paste quotes</label><textarea id="quoteInput">Supplier A
+Chaise bureau ergonomique 500 pcs 22 TND
+Livraison 12 jours
+Total HT: 11000 TND
+
+Supplier B
+Chaise bureau premium 500 pcs 25 TND
+Livraison 20 jours
+Total HT: 12500 TND</textarea></div>
+            <button class="primary" id="parseQuotesBtn" type="button">Parse quotes</button>
+          </div>
+        </aside>
+        <section>
+          <article class="panel"><div class="panel-header"><h2 class="panel-title">Parsed / compared quotes</h2></div><div class="panel-body"><pre class="json" id="quoteOutput">// Quotes will appear here.</pre></div></article>
+        </section>
+      </div>
+    </section>
+
+    <section id="chat" class="tab-panel">
+      <div class="layout">
+        <aside class="panel">
+          <div class="panel-header"><h2 class="panel-title">Context & Quick Actions</h2></div>
+          <div class="panel-body">
+            <div class="field">
+              <div class="contact-meta" style="margin-bottom: 12px;">Suppliers in database: <span id="chatSupplierCount">0</span></div>
+              <div class="contact-meta">Budget tracking: Active via cost centers</div>
+            </div>
+            <div class="section-title">Suggested Prompts</div>
+            <div class="suggested-prompts" id="suggestedPrompts" style="display: grid; gap: 8px;">
+              <button class="secondary" type="button" data-prompt="I need 500 ergonomic office chairs in Tunis, budget 12000 TND, delivery within 15 days">Create Requisition</button>
+              <button class="secondary" type="button" data-prompt="Compare suppliers for laptops">Compare Suppliers</button>
+              <button class="secondary" type="button" data-prompt="Check available suppliers in stock">Check Stock</button>
+              <button class="secondary" type="button" data-prompt="Analyze risk for my procurement">Analyze Risk</button>
+            </div>
+          </div>
+        </aside>
+        <section>
+          <article class="panel" style="display: flex; flex-direction: column; height: 100%;">
+            <div class="panel-header"><h2 class="panel-title">AI Copilot Chat</h2><span class="muted" id="chatStatus">Ready</span></div>
+            <div class="panel-body" style="flex: 1; display: flex; flex-direction: column; min-height: 400px;">
+              <div id="chatPreview" style="display: none; margin-bottom: 8px; align-items: center; gap: 8px;">
+                <img id="chatPreviewImg" style="max-width: 100px; max-height: 70px; border-radius: 8px; border: 1px solid var(--line);">
+                <span id="chatPreviewName" class="hint"></span>
+              </div>
+              <input id="chatFile" type="file" accept="image/*,.pdf" style="display: none;">
+              <div id="chatMessages" class="contact-list" style="flex: 1; overflow-y: auto; margin-bottom: 12px; max-height: 400px;"></div>
+              <form id="chatForm" style="display: flex; gap: 8px;">
+                <input id="chatInput" type="text" placeholder="Ask about procurement, suppliers, quotes..." autocomplete="off" style="flex: 1;">
+                <button class="secondary" id="voiceBtn" type="button" title="Voice input" style="width: auto;">🎤</button>
+                <button class="primary" id="chatSendBtn" type="submit" style="width: auto;">Send</button>
+              </form>
+            </div>
+          </article>
+        </section>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="modal-backdrop" id="supplierModal">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">Supplier details</div>
+          <h2 class="panel-title" id="supplierModalTitle" style="margin-top: 10px;">Supplier</h2>
+        </div>
+        <button class="modal-close" id="closeSupplierModal" type="button">Close</button>
+      </div>
+      <div class="modal-body" id="supplierModalBody"></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = { socket: null, latestCrawl: null, latestWorkflow: null, eventCount: 0 };
+    const api = (path, payload) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}) }).then((r) => r.json());
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+    }
+
+    function badgeClass(value) {
+      const v = String(value || '').toLowerCase();
+      if (['high', 'valid', 'completed', 'confirmed', 'low'].includes(v)) return 'high';
+      if (['medium', 'unknown', 'likely', 'uncertain', 'risky'].includes(v)) return 'medium';
+      return 'rejected';
+    }
+
+    function setJson(el, value) { el.textContent = JSON.stringify(value, null, 2); }
+    function setStatus(text, live = false) { $('statusText').textContent = text; $('statusDot').classList.toggle('live', live); }
+    function setBusy(el, busy) { if (el) el.disabled = busy; }
+    function shortText(value, max = 140) {
+      const noise = ['close', 'menu', 'connexion', 'connection', 'login', 'search', 'cart', 'panier', 'accueil', 'home'];
+      const text = String(value || '').replace(/\s+/g, ' ').trim();
+      const cleaned = noise.filter((word) => !text.toLowerCase().startsWith(word)).length === noise.length ? text : text.split(/\s+/).filter((word) => !noise.includes(word.toLowerCase())).join(' ');
+      return cleaned.length > max ? cleaned.slice(0, max) + '…' : cleaned;
+    }
+    function formatMoney(value, currency) {
+      if (value === null || value === undefined || value === '') return 'n/a';
+      return `${Number(value).toLocaleString('fr-FR')} ${currency || ''}`.trim();
+    }
+
+    document.querySelectorAll('.tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach((item) => item.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.remove('active'));
+        tab.classList.add('active');
+        $(tab.dataset.tab).classList.add('active');
+      });
+    });
+
+    $('closeSupplierModal').addEventListener('click', () => {
+      $('supplierModal').classList.remove('show');
+      document.body.style.overflow = '';
+    });
+
+    $('closeSupplierModal').addEventListener('click', () => {
+      $('supplierModal').classList.remove('show');
+      document.body.style.overflow = '';
+    });
+
+    $('supplierModal').addEventListener('click', (event) => {
+      if (event.target === $('supplierModal')) {
+        $('supplierModal').classList.remove('show');
+        document.body.style.overflow = '';
+      }
+    });
+
+    $('uploadFile').addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      const preview = $('uploadPreview');
+      const nameEl = $('uploadFileName');
+      if (!file) {
+        preview.style.display = 'none';
+        preview.src = '';
+        nameEl.textContent = '';
+        return;
+      }
+      nameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      if (file.type.startsWith('image/')) {
+        preview.src = URL.createObjectURL(file);
+        preview.style.display = 'block';
+      } else {
+        preview.style.display = 'none';
+        preview.src = '';
+      }
+    });
+
+    $('chatFile').addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      const preview = $('chatPreview');
+      const previewImg = $('chatPreviewImg');
+      const nameEl = $('chatPreviewName');
+      if (!file) {
+        preview.style.display = 'none';
+        previewImg.src = '';
+        nameEl.textContent = '';
+        return;
+      }
+      nameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      if (file.type.startsWith('image/')) {
+        previewImg.src = URL.createObjectURL(file);
+        previewImg.style.display = 'block';
+        preview.style.display = 'flex';
+      } else {
+        previewImg.style.display = 'none';
+        preview.style.display = 'flex';
+      }
+    });
+
+    $('workflowForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setBusy($('runWorkflowBtn'), true);
+      setStatus('AI workflow running…', true);
+      const suppliers = $('suppliersJson').value.trim() ? JSON.parse($('suppliersJson').value) : [];
+      const quotesText = $('quotesText').value.trim();
+      const quotes = quotesText ? [{ supplier_name: 'Pasted quote', text: quotesText }] : [];
+      const payload = {
+        need_text: $('needText').value,
+        suppliers,
+        quotes,
+        top_k: Number($('topK').value),
+        use_llm: $('useLlm').value === 'true',
+      };
+      const file = $('uploadFile').files?.[0];
+      if (file) {
+        const base64 = await fileToBase64(file);
+        if (file.type.startsWith('image/')) {
+          payload.image = base64;
+        } else if (file.type === 'application/pdf') {
+          payload.pdf = base64;
+        }
+        payload.filename = file.name.replace(/\.[^/.]+$/, '');
+      }
+      const result = await api('/api/ai/workflow', payload);
+      state.latestWorkflow = result;
+      setJson($('workflowOutput'), result);
+      renderWorkflowResult(result);
+      $('metricItems').textContent = result.rfq?.items?.length || 0;
+      $('metricSuppliers').textContent = result.supplier_matches?.length || 0;
+      $('metricQuotes').textContent = result.quote_comparisons?.length || 0;
+      $('metricRisk').textContent = result.risk?.risk_score || 0;
+      setBusy($('runWorkflowBtn'), false);
+      setStatus('Workflow complete', false);
+    });
+
+    let crawlSocket = null;
+    let crawlRunning = false;
+
+    $('crawlForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (crawlRunning) return;
+      crawlRunning = true;
+      setBusy($('startBtn'), true);
+      setStatus('Crawler running…', true);
+      $('events').innerHTML = '';
+      $('eventCount').textContent = '0 événements';
+      state.eventCount = 0;
+      $('contactResults').innerHTML = '<div class="muted">No verified contacts yet.</div>';
+
+      const payload = {
+        url: $('url').value,
+        max_pages: Number($('maxPages').value),
+        same_domain_only: $('sameDomain').checked,
+        delay_seconds: parseFloat($('delaySeconds').value),
+        timeout_seconds: Number($('timeoutSeconds').value),
+        verify_contacts: $('verifyContacts').checked,
+        smtp_verify: $('smtpVerify').checked,
+        deep_email_verify: $('deepEmailVerify').checked,
+        phone_default_region: $('region').value || 'TN',
+      };
+
+      try {
+        crawlSocket = new WebSocket(window.location.origin.replace(/^http/, 'ws') + '/ws/crawl');
+        crawlSocket.onopen = () => {
+          crawlSocket.send(JSON.stringify(payload));
+        };
+        crawlSocket.onmessage = (e) => {
+          const msg = JSON.parse(e.data);
+          const type = msg.type;
+          const data = msg.payload || {};
+          if (type === 'crawl_started') {
+            addCrawlEvent('started', `Crawl started: ${data.target_url} (${data.max_pages} pages max)`);
+          } else if (type === 'crawl_event') {
+            addCrawlEvent('event', data.message || JSON.stringify(data));
+          } else if (type === 'result') {
+            state.latestCrawl = data;
+            setJson($('crawlOutput'), data);
+            $('addSuppliersFromCrawlBtn').disabled = false;
+            renderCrawlEmails(data.verified_emails || []);
+            if ((data.verified_phones || []).length) {
+              renderCrawlPhones(data.verified_phones || []);
+            }
+            addCrawlEvent('completed', `Crawl completed: ${data.pages_crawled || 0} pages, ${(data.verified_emails || []).length} emails, ${(data.verified_phones || []).length} phones`);
+            setStatus('Crawl complete', false);
+            setBusy($('startBtn'), false);
+            crawlRunning = false;
+            if (crawlSocket) { crawlSocket.close(); crawlSocket = null; }
+          } else if (type === 'error') {
+            addCrawlEvent('error', data.message || 'Unknown error');
+            setStatus('Crawl error', false);
+            setBusy($('startBtn'), false);
+            crawlRunning = false;
+            if (crawlSocket) { crawlSocket.close(); crawlSocket = null; }
+          }
+        };
+        crawlSocket.onerror = () => {
+          addCrawlEvent('error', 'WebSocket connection failed');
+          setStatus('Crawl error', false);
+          setBusy($('startBtn'), false);
+          crawlRunning = false;
+        };
+        crawlSocket.onclose = () => {
+          if (crawlRunning) {
+            crawlRunning = false;
+            setBusy($('startBtn'), false);
+          }
+          crawlSocket = null;
+        };
+      } catch (exc) {
+        addCrawlEvent('error', String(exc));
+        setStatus('Crawl error', false);
+        setBusy($('startBtn'), false);
+        crawlRunning = false;
+      }
+    });
+
+    function addCrawlEvent(kind, detail) {
+      const list = $('events');
+      const item = document.createElement('li');
+      item.className = 'event';
+      const now = new Date();
+      const time = now.toLocaleTimeString('fr-FR');
+      item.innerHTML = `<span class="event-time">${escapeHtml(time)}</span><div><span class="event-kind">${escapeHtml(kind)}</span><div class="event-detail">${escapeHtml(detail)}</div></div>`;
+      list.appendChild(item);
+      list.scrollTop = list.scrollHeight;
+      state.eventCount++;
+      $('eventCount').textContent = `${state.eventCount} événements`;
+    }
+
+    function renderCrawlEmails(emails) {
+      const el = $('contactResults');
+      if (!emails.length) {
+        el.innerHTML = '<div class="muted">No verified emails.</div>';
+        return;
+      }
+      el.innerHTML = emails.map((e) => {
+        const email = e.email || '';
+        const score = e.score ?? 'n/a';
+        const credibility = e.credibility || 'unknown';
+        const deliverability = e.deliverability || 'unknown';
+        const smtpStatus = e.smtp_status || 'skipped';
+        const mxHost = e.mx_host || 'no MX';
+        const hasMx = e.has_mx_record ? 'yes' : 'no';
+        const spf = e.checks?.spf || 'unknown';
+        const dmarc = e.checks?.dmarc || 'unknown';
+        const catchAll = e.checks?.catch_all ? 'yes' : 'no';
+        const reason = e.reason || '';
+        const detail = e.smtp_detail || '';
+        return `<div class="contact-card">
+          <div class="contact-value">${escapeHtml(email)}</div>
+          <div class="contact-meta">Score: ${escapeHtml(String(score))} · Credibility: ${escapeHtml(credibility)} · Deliverability: ${escapeHtml(deliverability)}</div>
+          <div class="contact-meta">SMTP: ${escapeHtml(smtpStatus)} (${escapeHtml(detail)}) · MX: ${escapeHtml(mxHost)} · SPF: ${escapeHtml(spf)} · DMARC: ${escapeHtml(dmarc)} · Catch-all: ${catchAll}</div>
+          ${reason ? `<div class="contact-meta">${escapeHtml(reason)}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    function renderCrawlPhones(phones) {
+      const el = $('contactResults');
+      if (!phones.length) return;
+      const phonesHtml = phones.map((p) => {
+        const raw = p.raw || '';
+        const credibility = p.credibility || 'unknown';
+        const valid = p.is_valid ? 'valid' : 'invalid';
+        const possible = p.is_possible ? 'possible' : 'not possible';
+        const numType = p.number_type || 'unknown';
+        const region = p.region || '';
+        const carrier = p.carrier || '';
+        const e164 = p.parsed_e164 || '';
+        return `<div class="contact-card">
+          <div class="contact-value">${escapeHtml(raw)}</div>
+          <div class="contact-meta">Credibility: ${escapeHtml(credibility)} · Validity: ${valid} · Possible: ${possible} · Type: ${escapeHtml(numType)}</div>
+          <div class="contact-meta">E164: ${escapeHtml(e164)} · Region: ${escapeHtml(region)} · Carrier: ${escapeHtml(carrier)}</div>
+        </div>`;
+      }).join('');
+      el.insertAdjacentHTML('beforeend', phonesHtml);
+    }
+
+    $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
+      if (!state.latestCrawl) return;
+      setBusy($('addSuppliersFromCrawlBtn'), true);
+      try {
+        const result = await api('/api/ai/suppliers/from-crawl', { crawl_result: state.latestCrawl });
+        addCrawlEvent('suppliers_added', `${result.suppliers?.length || 0} suppliers added to database`);
+        setStatus('Suppliers added', false);
+      } catch (exc) {
+        addCrawlEvent('error', 'Failed to add suppliers: ' + (exc.message || String(exc)));
+      } finally {
+        setBusy($('addSuppliersFromCrawlBtn'), false);
+      }
+    });
+
+    function renderWorkflowResult(result) {
+      renderRfq(result?.rfq);
+      renderRagContext(result?.rfq?.rag_context);
+      renderSupplierMatches(result?.supplier_matches || []);
+      renderQuoteComparisons(result?.quote_comparisons || []);
+      renderRisk(result?.risk);
+      renderExecutiveSummary(result?.report);
+    }
+
+    function renderRagContext(ragContext) {
+      const el = $('ragContext');
+      if (!ragContext) { el.innerHTML = ''; return; }
+      const similarRfqs = ragContext.similar_rfqs || [];
+      const similarSuppliers = ragContext.similar_suppliers || [];
+      el.innerHTML = `
+        <article class="panel" style="margin-top: 18px;">
+          <div class="panel-header"><h2 class="panel-title">RAG Context</h2><span class="muted">${similarRfqs.length} similar RFQs · ${similarSuppliers.length} similar suppliers</span></div>
+          <div class="panel-body">
+            ${similarRfqs.length ? `<div class="section-title">Similar RFQs</div>
+            <div class="card-list">
+              ${similarRfqs.map((rfq) => {
+                const meta = rfq.metadata || {};
+                const score = rfq.distance != null ? Math.max(0, Math.round((1 - rfq.distance) * 100)) : 'n/a';
+                return `
+                  <div class="result-card">
+                    <div class="contact-value">${escapeHtml(meta.title || rfq.document?.substring(0, 60) || 'Untitled RFQ')}</div>
+                    <div class="contact-meta">${escapeHtml(meta.category || 'No category')} · Similarity: ${score}%</div>
+                    ${rfq.document ? `<div class="contact-meta" style="margin-top: 6px;">${escapeHtml(rfq.document.substring(0, 200))}${rfq.document.length > 200 ? '…' : ''}</div>` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>` : '<div class="muted">No similar RFQs found.</div>'}
+            ${similarSuppliers.length ? `<div class="section-title" style="margin-top: 18px;">Similar Suppliers</div>
+            <div class="card-list">
+              ${similarSuppliers.map((sup) => {
+                const meta = sup.metadata || {};
+                const score = sup.distance != null ? Math.max(0, Math.round((1 - sup.distance) * 100)) : 'n/a';
+                return `
+                  <div class="result-card">
+                    <div class="contact-value">${escapeHtml(meta.name || sup.document?.substring(0, 60) || 'Unknown supplier')}</div>
+                    <div class="contact-meta">${escapeHtml((meta.categories || []).join(', ') || 'No category')} · Similarity: ${score}%</div>
+                  </div>
+                `;
+              }).join('')}
+            </div>` : ''}
+          </div>
+        </article>
+      `;
+    }
+
+    function renderRfq(rfq) {
+      if (!rfq) {
+        $('workflowSummary').innerHTML = '<div class="muted">No RFQ extracted yet.</div>';
+        return;
+      }
+      const items = (rfq.items || []).map((item) => `
+        <div class="contact-card" style="margin-bottom: 10px;">
+          <div class="contact-value">${escapeHtml(item.name)}</div>
+          <div class="contact-meta">Qty: ${item.quantity ?? 'n/a'} ${item.unit || ''} · Category: ${escapeHtml(item.category || 'n/a')} · Target: ${item.target_price ? formatMoney(item.target_price, rfq.currency) : 'n/a'}</div>
+        </div>
+      `).join('');
+      $('workflowSummary').innerHTML = `
+        <div class="summary-grid">
+          <div class="summary-card"><div class="summary-label">RFQ</div><div class="summary-value">${escapeHtml(rfq.title)}</div></div>
+          <div class="summary-card"><div class="summary-label">Location</div><div class="summary-value">${escapeHtml(rfq.location || 'n/a')}</div></div>
+          <div class="summary-card"><div class="summary-label">Budget</div><div class="summary-value">${rfq.budget ? formatMoney(rfq.budget, rfq.currency) : 'n/a'}</div></div>
+          <div class="summary-card"><div class="summary-label">Delivery</div><div class="summary-value">${rfq.delivery_deadline_days ? rfq.delivery_deadline_days + ' days' : 'n/a'}</div></div>
+          <div class="summary-card"><div class="summary-label">Required certs</div><div class="summary-value">${escapeHtml((rfq.certifications || []).join(', ') || 'None')}</div></div>
+          <div class="summary-card"><div class="summary-label">Confidence</div><div class="summary-value">${Math.round((rfq.confidence || 0) * 100)}%</div></div>
+          <div class="summary-card"><div class="summary-label">Extractor</div><div class="summary-value">${escapeHtml(rfq.extracted_by || 'api')}</div></div>
+        </div>
+        <div class="section-title">Extracted items</div>
+        ${items || '<div class="muted">No line items extracted.</div>'}
+      `;
+    }
+
+    function renderSupplierMatches(matches) {
+      if (!matches || !matches.length) {
+        $('supplierMatches').innerHTML = '<article class="panel"><div class="panel-header"><h2 class="panel-title">Supplier matches</h2></div><div class="panel-body"><div class="muted">No suppliers matched yet.</div></div></article>';
+        return;
+      }
+      $('supplierMatches').innerHTML = `
+        <article class="panel" style="margin-top: 18px;">
+          <div class="panel-header"><h2 class="panel-title">Top matching suppliers</h2><span class="muted">${matches.length} suppliers</span></div>
+          <div class="panel-body">
+            ${matches.map((match, index) => {
+              const supplier = match.supplier || {};
+              const reasons = match.rank_reason || {};
+              return `
+                <div class="supplier-card">
+                  <div class="supplier-top">
+                    <div>
+                      <div class="contact-value">${index + 1}. ${escapeHtml(supplier.name || 'Unknown supplier')}</div>
+                      <div class="contact-meta">${escapeHtml(shortText(supplier.description))}</div>
+                      <div class="check-grid" style="margin-top: 8px;">
+                        <span class="mini-badge">${escapeHtml((supplier.categories || []).join(', ') || 'No category')}</span>
+                        <span class="mini-badge">${escapeHtml(supplier.city || supplier.country || 'Location n/a')}</span>
+                        <span class="mini-badge">${escapeHtml((supplier.certifications || []).join(', ') || 'No certification')}</span>
+                      </div>
+                    </div>
+                    <div style="text-align: right; display: grid; gap: 8px; justify-items: end;">
+                      <div class="metric-value">${match.score}</div>
+                      <div class="contact-meta">match score</div>
+                      <button class="secondary" type="button" onclick="openSupplierModal(${index})">View details</button>
+                    </div>
+                  </div>
+                  <div class="check-grid">
+                    <span class="mini-badge">semantic ${reasons.semantic_similarity ?? 'n/a'}</span>
+                    <span class="mini-badge">category ${reasons.category_fit ?? 'n/a'}</span>
+                    <span class="mini-badge">location ${reasons.location_fit ?? 'n/a'}</span>
+                    <span class="mini-badge">contacts ${reasons.contact_quality ?? 'n/a'}</span>
+                  </div>
+                  <div class="contact-meta">Contacts: ${escapeHtml(((supplier.contacts?.emails || []).join(', ') || 'No email') + ' · ' + ((supplier.contacts?.phones || []).slice(0, 3).join(', ') || 'No phone'))}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </article>
+      `;
+    }
+
+    function openSupplierModal(index) {
+      const workflow = chatState.workflowResult || state.latestWorkflow || {};
+      const match = workflow.supplier_matches?.[index];
+      if (!match) return;
+      const supplier = match.supplier || {};
+      const quotes = (workflow.quote_comparisons || []).filter((item) => item.quote?.supplier_name === supplier.name || item.quote?.supplier_id === supplier.id);
+      const contacts = supplier.contacts || {};
+      const emails = contacts.emails || [];
+      const phones = contacts.phones || [];
+
+      $('supplierModalTitle').textContent = supplier.name || 'Supplier details';
+      $('supplierModalBody').innerHTML = `
+        <div class="summary-grid">
+          <div class="summary-card"><div class="summary-label">Match score</div><div class="summary-value">${match.score}</div></div>
+          <div class="summary-card"><div class="summary-label">Website</div><div class="summary-value">${escapeHtml(supplier.website || 'n/a')}</div></div>
+          <div class="summary-card"><div class="summary-label">Source</div><div class="summary-value">${escapeHtml(supplier.source || 'n/a')}</div></div>
+          <div class="summary-card"><div class="summary-label">Categories</div><div class="summary-value">${escapeHtml((supplier.categories || []).join(', ') || 'n/a')}</div></div>
+          <div class="summary-card"><div class="summary-label">City / Country</div><div class="summary-value">${escapeHtml([supplier.city, supplier.country].filter(Boolean).join(' / ') || 'n/a')}</div></div>
+          <div class="summary-card"><div class="summary-label">Supplier score</div><div class="summary-value">${supplier.score ?? 'n/a'}</div></div>
+          <div class="summary-card"><div class="summary-label">Certification power</div><div class="summary-value">${match.rank_reason?.certification_score ?? 'n/a'}</div></div>
+        </div>
+
+        <div class="section-title">Description</div>
+        <div class="result-card"><div class="contact-meta">${escapeHtml(supplier.description || 'No description available.')}</div></div>
+
+        <div class="section-title" style="margin-top: 18px;">Capabilities</div>
+        <div class="check-grid">${(supplier.capabilities || []).map((cap) => `<span class="mini-badge">${escapeHtml(cap)}</span>`).join('') || '<div class="muted">No capabilities listed.</div>'}</div>
+
+        <div class="section-title" style="margin-top: 18px;">Certifications</div>
+        <div class="check-grid">${(supplier.certifications || []).map((cert) => `<span class="mini-badge">${escapeHtml(cert)}</span>`).join('') || '<div class="muted">No certifications listed.</div>'}</div>
+
+        <div class="section-title" style="margin-top: 18px;">Contacts credibility</div>
+        <div class="contact-list" style="max-height: none;">
+          ${emails.length ? emails.map((email) => `<div class="contact-card"><div class="contact-value">${escapeHtml(email)}</div></div>`).join('') : '<div class="muted">No email available.</div>'}
+          ${phones.length ? phones.map((phone) => `<div class="contact-card"><div class="contact-value">${escapeHtml(phone)}</div></div>`).join('') : '<div class="muted">No phone available.</div>'}
+        </div>
+
+        <div class="section-title" style="margin-top: 18px;">Match reasons</div>
+        <div class="check-grid">
+          <span class="mini-badge">semantic ${match.rank_reason?.semantic_similarity ?? 'n/a'}</span>
+          <span class="mini-badge">category ${match.rank_reason?.category_fit ?? 'n/a'}</span>
+          <span class="mini-badge">location ${match.rank_reason?.location_fit ?? 'n/a'}</span>
+          <span class="mini-badge">certification ${match.rank_reason?.certification_score ?? 'n/a'}</span>
+          <span class="mini-badge">contacts ${match.rank_reason?.contact_quality ?? 'n/a'}</span>
+          <span class="mini-badge">capability ${match.rank_reason?.capability_fit ?? 'n/a'}</span>
+        </div>
+        <div class="check-grid" style="margin-top: 8px;">
+          ${Object.keys(match.rank_reason?.certification_breakdown || {}).map((cert) => {
+            const detail = (match.rank_reason?.certification_breakdown || {})[cert] || {};
+            return `<span class="mini-badge">${escapeHtml(cert)} → ${escapeHtml(detail.matched_cert || 'missing')} · ${detail.score ?? 0} · power ${detail.cert_power ?? 'n/a'}</span>`;
+          }).join('')}
+        </div>
+
+        <div class="section-title" style="margin-top: 18px;">Offers from this supplier</div>
+
+        ${quotes.length ? quotes.map((quoteItem, quoteIndex) => renderQuoteDetail(quoteItem, quoteIndex)).join('') : '<div class="result-card"><div class="contact-meta">No quote received yet for this supplier.</div></div>'}
+
+        <div class="section-title" style="margin-top: 18px;">Raw supplier data</div>
+        <pre class="json">${escapeHtml(JSON.stringify(supplier, null, 2))}</pre>
+      `;
+      $('supplierModal').classList.add('show');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function renderQuoteDetail(quoteItem, quoteIndex) {
+      const quote = quoteItem.quote || {};
+      const lines = quote.lines || [];
+      const matchedLinesHtml = (quoteItem.matched_lines || []).map((line) => `
+        <div class="contact-meta" style="margin-top: 6px;">
+          ${escapeHtml(line.rfq_item?.name || '')} → ${escapeHtml(line.quote_line?.description || '')} · match ${line.match_score}
+        </div>
+      `).join('');
+      return `
+        <div class="result-card" style="margin-bottom: 12px;">
+          <div class="supplier-top">
+            <div>
+              <div class="contact-value">Offer ${quoteIndex + 1}</div>
+              <div class="contact-meta">Currency: ${escapeHtml(quote.currency || 'n/a')} · Payment: ${escapeHtml(quote.payment_terms || 'n/a')}</div>
+            </div>
+            <div style="text-align: right;">
+              <div class="metric-value">${formatMoney(quote.total_amount, quote.currency)}</div>
+              <div class="contact-meta">total</div>
+            </div>
+          </div>
+          <div class="check-grid" style="margin-top: 12px;">
+            <span class="mini-badge">delivery ${quote.delivery_days ? quote.delivery_days + ' days' : 'n/a'}</span>
+            <span class="mini-badge">coverage ${Math.round((quoteItem.coverage_score || 0) * 100)}%</span>
+            <span class="mini-badge">price ${quoteItem.price_score ?? 'n/a'}</span>
+            <span class="mini-badge">final ${quoteItem.final_score ?? 'n/a'}</span>
+          </div>
+          ${lines.length ? `<table class="offer-table" style="margin-top: 12px;"><thead><tr><th>Line</th><th>Qty</th><th>Unit</th><th>Price</th></tr></thead><tbody>${lines.map((line) => `<tr><td>${escapeHtml(line.description)}</td><td>${line.quantity ?? 'n/a'}</td><td>${escapeHtml(line.unit || '')}</td><td>${formatMoney(line.unit_price, line.currency)}</td></tr>`).join('')}</tbody></table>` : ''}
+          ${matchedLinesHtml ? `<div class="section-title" style="margin-top: 12px;">Matched RFQ lines</div>${matchedLinesHtml}` : ''}
+        </div>
+      `;
+    }
+
+    function renderQuoteComparisons(comparisons) {
+      if (!comparisons || !comparisons.length) {
+        $('quoteComparisons').innerHTML = '<article class="panel" style="margin-top: 18px;"><div class="panel-header"><h2 class="panel-title">Offer comparison</h2></div><div class="panel-body"><div class="muted">No quotes compared yet.</div></div></article>';
+        return;
+      }
+      $('quoteComparisons').innerHTML = `
+        <article class="panel" style="margin-top: 18px;">
+          <div class="panel-header"><h2 class="panel-title">Offer comparison</h2><span class="muted">${comparisons.length} offers</span></div>
+          <div class="panel-body">
+            <table class="offer-table">
+              <thead><tr><th>#</th><th>Supplier</th><th>Total</th><th>Delivery</th><th>Coverage</th><th>Price</th><th>Final</th><th>Reason</th></tr></thead>
+              <tbody>
+                ${comparisons.map((item, index) => `
+                  <tr>
+                    <td>${index + 1}</td>
+                    <td><div class="contact-value">${escapeHtml(item.quote?.supplier_name || 'Unknown')}</div></td>
+                    <td>${formatMoney(item.quote?.total_amount, item.quote?.currency)}</td>
+                    <td>${item.quote?.delivery_days ? item.quote.delivery_days + ' days' : 'n/a'}</td>
+                    <td>${Math.round((item.coverage_score || 0) * 100)}%</td>
+                    <td>${item.price_score ?? 'n/a'}</td>
+                    <td><span class="badge ${badgeClass(item.final_score >= 70 ? 'high' : item.final_score >= 45 ? 'medium' : 'rejected')}">${item.final_score ?? 'n/a'}</span></td>
+                    <td>${escapeHtml((item.rank_reason || {}).price || '')} · ${escapeHtml((item.rank_reason || {}).delivery || '')}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      `;
+    }
+
+    function renderExecutiveSummary(report) {
+      const el = $('executiveSummary');
+      if (!report) { el.innerHTML = '<div class="muted">No summary yet.</div>'; return; }
+      el.innerHTML = `
+        <div class="result-card"><div class="contact-value">${escapeHtml(report.executive_summary || '')}</div></div>
+        ${(report.key_points || []).map((point) => `<div class="result-card"><div class="contact-meta">${escapeHtml(point)}</div></div>`).join('')}
+      `;
+    }
+
+    function renderRisk(risk) {
+      const list = $('riskList');
+      if (!risk) { list.innerHTML = '<div class="muted">No risk assessment yet.</div>'; return; }
+      list.innerHTML = risk.flags.map((flag) => `
+        <div class="result-card">
+          <div class="contact-value">${escapeHtml(flag.type)}</div>
+          <div class="contact-meta">${escapeHtml(flag.message)}</div>
+          <span class="badge ${badgeClass(flag.severity)}">${escapeHtml(flag.severity)}</span>
+        </div>
+      `).join('') || '<div class="muted">No flags detected.</div>';
+    }
+
+    $('parseQuotesBtn').addEventListener('click', async () => {
+      const text = $('quoteInput').value.trim();
+      const quotes = text ? text.split(/\n\s*\n+/).map((part, index) => ({ supplier_name: `Quote ${index + 1}`, text: part })) : [];
+      const parsed = await api('/api/ai/quotes/parse', { quotes });
+      setJson($('quoteOutput'), parsed);
+    });
+
+    const messageEl = document.createElement('div');
+      messageEl.className = 'contact-card';
+      messageEl.style.marginBottom = '12px';
+      const isUser = role === 'user';
+      const workflowPayload = card?.workflow_payload ? JSON.stringify(card.workflow_payload).replace(/"/g, '&quot;') : '';
+      const supplierQuick = card?.result && card.action === 'compare_suppliers' ? renderSupplierQuick(card.result) : '';
+
+      let filePreviewHtml = '';
+      if (filePreview) {
+        if (filePreview.url) {
+          filePreviewHtml = `<div style="margin-top: 6px;"><img src="${filePreview.url}" style="max-width: 120px; max-height: 80px; border-radius: 8px; border: 1px solid var(--line);"></div>`;
+        }
+        filePreviewHtml += `<div class="contact-meta" style="margin-top: 4px;">${escapeHtml(filePreview.name)} (${escapeHtml(filePreview.size)})</div>`;
+      }
+
+      let rfqHtml = '';
+      if (rfq) {
+        const items = (rfq.items || []).map((item) => `
+          <div class="contact-card" style="margin-bottom: 6px; background: rgba(255,255,255,0.02);">
+            <div class="contact-value" style="font-size: 13px;">${escapeHtml(item.name)}</div>
+            <div class="contact-meta">Qty: ${item.quantity ?? 'n/a'} ${item.unit || ''}</div>
+          </div>
+        `).join('');
+        rfqHtml = `
+          <div style="margin-top: 10px; padding: 10px; border-radius: 10px; background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.18);">
+            <div class="panel-title" style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #34d399;">Extracted RFQ</div>
+            <div class="contact-value" style="font-size: 13px;">${escapeHtml(rfq.title || 'Procurement')}</div>
+            <div class="contact-meta">${items || '<div class="muted">No items extracted</div>'}</div>
+          </div>
+        `;
+      }
+
+      let ragHtml = '';
+      if (ragContext) {
+        const rfqs = ragContext.similar_rfqs || [];
+        const suppliers = ragContext.similar_suppliers || [];
+        ragHtml = `
+          <div style="margin-top: 10px; padding: 10px; border-radius: 10px; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.18);">
+            <div class="panel-title" style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #58a6ff;">RAG Knowledge</div>
+            <div class="contact-meta" style="margin-bottom: 6px;">${rfqs.length} similar RFQs · ${suppliers.length} similar suppliers</div>
+            ${rfqs.length ? rfqs.slice(0, 3).map(r => {
+              const meta = r.metadata || {};
+              const score = r.distance != null ? Math.max(0, Math.round((1 - r.distance) * 100)) : 'n/a';
+              return `<div class="contact-meta" style="margin-bottom: 4px;">RFQ: ${escapeHtml(meta.title || 'Untitled')} (${score}%)</div>`;
+            }).join('') : ''}
+            ${suppliers.length ? suppliers.slice(0, 3).map(s => {
+              const meta = s.metadata || {};
+              const score = s.distance != null ? Math.max(0, Math.round((1 - s.distance) * 100)) : 'n/a';
+              return `<div class="contact-meta" style="margin-bottom: 4px;">Supplier: ${escapeHtml(meta.name || 'Unknown')} (${score}%)</div>`;
+            }).join('') : ''}
+          </div>
+        `;
+      }
+
+      messageEl.innerHTML = `
+        <div style="display: flex; justify-content: ${isUser ? 'flex-end' : 'flex-start'};">
+          <div style="max-width: 80%; background: ${isUser ? 'rgba(88, 166, 255, 0.15)' : 'rgba(255, 255, 255, 0.035)'}; border-radius: 12px; padding: 10px 12px;">
+            <div class="contact-value" style="font-size: 14px;">${escapeHtml(content)}</div>
+            ${filePreviewHtml}
+            ${supplierQuick}
+            ${rfqHtml}
+            ${ragHtml}
+            ${card && card.action ? `<div style="margin-top: 8px;"><button class="secondary" type="button" data-action="${escapeHtml(card.action)}" data-workflow="${workflowPayload}">${escapeHtml(card.title)}</button></div>` : ''}
+          </div>
+        </div>
+      `;
+      $('chatMessages').appendChild(messageEl);
+      $('chatMessages').scrollTop = $('chatMessages').scrollHeight;
+      const actionBtn = messageEl.querySelector('button[data-action]');
+      if (actionBtn) {
+        actionBtn.addEventListener('click', () => {
+          const action = actionBtn.dataset.action;
+          try {
+            const workflow = actionBtn.dataset.workflow ? JSON.parse(actionBtn.dataset.workflow.replace(/&quot;/g, '"')) : {};
+            handleActionCard(action, workflow);
+          } catch (e) {
+            handleActionCard(action, {});
+          }
+        });
+      }
+      const supplierCards = messageEl.querySelectorAll('[data-supplier-index]');
+      supplierCards.forEach(card => {
+        card.addEventListener('click', () => {
+          const idx = parseInt(card.dataset.supplierIndex);
+          const result = chatState.workflowResult;
+          if (result && result.supplier_matches && result.supplier_matches[idx]) {
+            openSupplierModal(idx);
+          }
+        });
+      });
+    
+  
+    function handleActionCard(action, workflow) {
+      if (action === 'create_rfq' || action === 'compare_suppliers') {
+        $('needText').value = workflow.need_text || '';
+        runChatWorkflow();
+      }
+    }
+
+    async function runChatWorkflow() {
+      const needText = $('needText').value;
+      if (!needText) return;
+      $('runWorkflowBtn').disabled = true;
+      $('chatStatus').textContent = 'Running workflow...';
+      const result = await api('/api/ai/workflow', { need_text: needText, top_k: 5 });
+      chatState.workflowResult = result;
+      $('workflowOutput').textContent = JSON.stringify(result, null, 2);
+      document.querySelector('.tab[data-tab="workflow"]').click();
+      $('runWorkflowBtn').disabled = false;
+      $('chatStatus').textContent = 'Ready';
+      chatState.messages.push({role: 'workflow_result', data: result});
+      renderWorkflowInChat(result);
+    }
+
+    function renderWorkflowInChat(result) {
+      let html = '<div style="margin-top: 12px;"><div class="panel-title">Workflow Results</div>';
+      html += `<div class="result-card" style="margin-top: 8px;">
+        <div class="contact-value">RFQ: ${escapeHtml(result.rfq?.title || 'N/A')}</div>
+        <div class="contact-meta">Items: ${result.rfq?.items?.length || 0} · Matches: ${result.supplier_matches?.length || 0}</div>
+      </div>`;
+      if (result.supplier_matches && result.supplier_matches.length) {
+        html += '<div class="panel-title" style="margin-top: 12px;">Supplier Scores Chart</div>';
+        html += '<div style="margin-top: 8px; max-height: 120px; overflow-y: auto;">';
+        result.supplier_matches.slice(0, 5).forEach((m, i) => {
+          const pct = Math.min(100, (m.score || 0) * 2);
+          html += `<div style="margin-bottom: 6px;">
+            <div style="font-size: 11px; color: var(--muted);">${escapeHtml((m.supplier?.name || '?').substring(0, 20))}</div>
+            <div style="height: 16px; background: rgba(255,255,255,0.04); border-radius: 8px; overflow: hidden;">
+              <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, var(--blue), var(--cyan));"></div>
+            </div>
+          </div>`;
+        });
+        html += '</div>';
+      }
+$('chatMessages').insertAdjacentHTML('beforeend', html);
+    }
+
+    $('chatMode').addEventListener('change', () => {
+      const mode = $('chatMode').value;
+      const modeText = mode === 'ocr' ? 'OCR Mode (Extract RFQ)' : 'RAG Mode (Knowledge base)';
+      $('modeText').textContent = modeText;
+      $('modeIndicator').style.display = 'block';
+    });
+
+    $('uploadBtn').addEventListener('click', () => {
+      $('chatFile').click();
+    });
+
+    $('chatForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = $('chatInput').value.trim();
+      const file = $('chatFile').files?.[0];
+      const mode = $('chatMode').value;
+      if (!input && !file) return;
+      chatState.messages.push({role: 'user', content: input || `Uploaded: ${file?.name}`, mode});
+      saveChatHistory();
+
+      let filePreview = null;
+      if (file) {
+        filePreview = {
+          name: file.name,
+          type: file.type,
+          url: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
+          size: (file.size / 1024).toFixed(1) + ' KB',
+          mode
+        };
+      }
+      renderChatMessage('user', input || `Uploaded: ${file?.name}`, null, filePreview);
+
+      $('chatInput').value = '';
+      setBusy($('chatSendBtn'), true);
+      $('chatStatus').textContent = 'Thinking...';
+
+      const payload = { mode };
+      if (input) payload.message = input;
+      if (file) {
+        const base64 = await fileToBase64(file);
+        if (file.type.startsWith('image/')) {
+          payload.image = base64;
+        } else if (file.type === 'application/pdf') {
+          payload.pdf = base64;
+        }
+      }
+
+      const result = await api('/api/ai/chat', payload);
+      setBusy($('chatSendBtn'), false);
+      $('chatStatus').textContent = 'Ready';
+      $('chatFile').value = '';
+      $('chatPreview').style.display = 'none';
+
+      const rfq = result.rfq || null;
+      const ragContext = result.rag_context || null;
+
+      chatState.messages.push({role: 'assistant', content: result.response, card: result.action_card, rfq, ragContext});
+      saveChatHistory();
+      renderChatMessage('assistant', result.response, result.action_card, null, rfq, ragContext);
+    });
+
+    const voiceBtn = $('voiceBtn');
+    voiceBtn.addEventListener('click', () => {
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        $('chatStatus').textContent = 'Voice not supported';
+        return;
+      }
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'fr-FR';
+      recognition.interimResults = false;
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        $('chatInput').value = transcript;
+        $('chatForm').dispatchEvent(new Event('submit'));
+      };
+      recognition.onerror = () => { $('chatStatus').textContent = 'Voice error'; };
+      recognition.onend = () => { $('chatStatus').textContent = 'Ready'; };
+      $('chatStatus').textContent = 'Listening...';
+      recognition.start();
+    });
+
+    document.querySelectorAll('.suggested-prompts button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        $('chatInput').value = btn.dataset.prompt;
+        $('chatForm').dispatchEvent(new Event('submit'));
+      });
+    });
+
+    function saveChatHistory() {
+      localStorage.setItem('procurementChatHistory', JSON.stringify(chatState.messages.slice(-100)));
+    }
+
+    function loadChatHistory() {
+      const saved = localStorage.getItem('procurementChatHistory');
+      if (saved) {
+        try {
+          const messages = JSON.parse(saved);
+          messages.forEach(m => {
+            if (m.role === 'user') {
+              renderChatMessage('user', m.content);
+            } else if (m.role === 'assistant') {
+              renderChatMessage('assistant', m.content, m.card, null, m.rfq, m.rag_context);
+            } else if (m.role === 'workflow_result') {
+              chatState.workflowResult = m.data;
+              renderWorkflowInChat(m.data);
+            }
+          });
+          chatState.messages = messages;
+        } catch (e) {}
+      }
+    }
+
+    const newChatBtn = $('newChatBtn');
+    if (newChatBtn) {
+      newChatBtn.addEventListener('click', () => {
+        chatState.messages = [];
+        chatState.workflowResult = null;
+        $('chatMessages').innerHTML = '';
+      });
+    }
+
+    async function initChat() {
+      const stats = await (await fetch('/api/ai/database/stats')).json();
+      $('chatSupplierCount').textContent = stats.suppliers || 0;
+      const mode = $('chatMode').value;
+      $('modeText').textContent = mode === 'ocr' ? 'OCR Mode (Extract RFQ)' : 'RAG Mode (Knowledge base)';
+      $('modeIndicator').style.display = 'block';
+      loadChatHistory();
+      chatState.init = true;
+    }
+    initChat();
+
+    setStatus('Ready');
+  </script>
+</body>
+</html>
