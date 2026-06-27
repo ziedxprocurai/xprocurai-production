@@ -252,7 +252,7 @@ Total HT: 12500 TND</textarea></div>
       </div>
     </section>
 
-    <section id="chat" class="tab-panel">
+<section id="chat" class="tab-panel">
       <div class="layout">
         <aside class="panel">
           <div class="panel-header"><h2 class="panel-title">Context & Quick Actions</h2></div>
@@ -278,7 +278,7 @@ Total HT: 12500 TND</textarea></div>
                 <img id="chatPreviewImg" style="max-width: 100px; max-height: 70px; border-radius: 8px; border: 1px solid var(--line);">
                 <span id="chatPreviewName" class="hint"></span>
               </div>
-              <input id="chatFile" type="file" accept="image/*,.pdf" style="display: none;">
+              <input id="chatFile" type="file" accept="image/*,.pdf" style="margin-bottom: 8px; width: 100%;">
               <div id="chatMessages" class="contact-list" style="flex: 1; overflow-y: auto; margin-bottom: 12px; max-height: 400px;"></div>
               <form id="chatForm" style="display: flex; gap: 8px;">
                 <input id="chatInput" type="text" placeholder="Ask about procurement, suppliers, quotes..." autocomplete="off" style="flex: 1;">
@@ -352,11 +352,6 @@ Total HT: 12500 TND</textarea></div>
         tab.classList.add('active');
         $(tab.dataset.tab).classList.add('active');
       });
-    });
-
-    $('closeSupplierModal').addEventListener('click', () => {
-      $('supplierModal').classList.remove('show');
-      document.body.style.overflow = '';
     });
 
     $('closeSupplierModal').addEventListener('click', () => {
@@ -447,163 +442,6 @@ Total HT: 12500 TND</textarea></div>
       $('metricRisk').textContent = result.risk?.risk_score || 0;
       setBusy($('runWorkflowBtn'), false);
       setStatus('Workflow complete', false);
-    });
-
-    let crawlSocket = null;
-    let crawlRunning = false;
-
-    $('crawlForm').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      if (crawlRunning) return;
-      crawlRunning = true;
-      setBusy($('startBtn'), true);
-      setStatus('Crawler running…', true);
-      $('events').innerHTML = '';
-      $('eventCount').textContent = '0 événements';
-      state.eventCount = 0;
-      $('contactResults').innerHTML = '<div class="muted">No verified contacts yet.</div>';
-
-      const payload = {
-        url: $('url').value,
-        max_pages: Number($('maxPages').value),
-        same_domain_only: $('sameDomain').checked,
-        delay_seconds: parseFloat($('delaySeconds').value),
-        timeout_seconds: Number($('timeoutSeconds').value),
-        verify_contacts: $('verifyContacts').checked,
-        smtp_verify: $('smtpVerify').checked,
-        deep_email_verify: $('deepEmailVerify').checked,
-        phone_default_region: $('region').value || 'TN',
-      };
-
-      try {
-        crawlSocket = new WebSocket(window.location.origin.replace(/^http/, 'ws') + '/ws/crawl');
-        crawlSocket.onopen = () => {
-          crawlSocket.send(JSON.stringify(payload));
-        };
-        crawlSocket.onmessage = (e) => {
-          const msg = JSON.parse(e.data);
-          const type = msg.type;
-          const data = msg.payload || {};
-          if (type === 'crawl_started') {
-            addCrawlEvent('started', `Crawl started: ${data.target_url} (${data.max_pages} pages max)`);
-          } else if (type === 'crawl_event') {
-            addCrawlEvent('event', data.message || JSON.stringify(data));
-          } else if (type === 'result') {
-            state.latestCrawl = data;
-            setJson($('crawlOutput'), data);
-            $('addSuppliersFromCrawlBtn').disabled = false;
-            renderCrawlEmails(data.verified_emails || []);
-            if ((data.verified_phones || []).length) {
-              renderCrawlPhones(data.verified_phones || []);
-            }
-            addCrawlEvent('completed', `Crawl completed: ${data.pages_crawled || 0} pages, ${(data.verified_emails || []).length} emails, ${(data.verified_phones || []).length} phones`);
-            setStatus('Crawl complete', false);
-            setBusy($('startBtn'), false);
-            crawlRunning = false;
-            if (crawlSocket) { crawlSocket.close(); crawlSocket = null; }
-          } else if (type === 'error') {
-            addCrawlEvent('error', data.message || 'Unknown error');
-            setStatus('Crawl error', false);
-            setBusy($('startBtn'), false);
-            crawlRunning = false;
-            if (crawlSocket) { crawlSocket.close(); crawlSocket = null; }
-          }
-        };
-        crawlSocket.onerror = () => {
-          addCrawlEvent('error', 'WebSocket connection failed');
-          setStatus('Crawl error', false);
-          setBusy($('startBtn'), false);
-          crawlRunning = false;
-        };
-        crawlSocket.onclose = () => {
-          if (crawlRunning) {
-            crawlRunning = false;
-            setBusy($('startBtn'), false);
-          }
-          crawlSocket = null;
-        };
-      } catch (exc) {
-        addCrawlEvent('error', String(exc));
-        setStatus('Crawl error', false);
-        setBusy($('startBtn'), false);
-        crawlRunning = false;
-      }
-    });
-
-    function addCrawlEvent(kind, detail) {
-      const list = $('events');
-      const item = document.createElement('li');
-      item.className = 'event';
-      const now = new Date();
-      const time = now.toLocaleTimeString('fr-FR');
-      item.innerHTML = `<span class="event-time">${escapeHtml(time)}</span><div><span class="event-kind">${escapeHtml(kind)}</span><div class="event-detail">${escapeHtml(detail)}</div></div>`;
-      list.appendChild(item);
-      list.scrollTop = list.scrollHeight;
-      state.eventCount++;
-      $('eventCount').textContent = `${state.eventCount} événements`;
-    }
-
-    function renderCrawlEmails(emails) {
-      const el = $('contactResults');
-      if (!emails.length) {
-        el.innerHTML = '<div class="muted">No verified emails.</div>';
-        return;
-      }
-      el.innerHTML = emails.map((e) => {
-        const email = e.email || '';
-        const score = e.score ?? 'n/a';
-        const credibility = e.credibility || 'unknown';
-        const deliverability = e.deliverability || 'unknown';
-        const smtpStatus = e.smtp_status || 'skipped';
-        const mxHost = e.mx_host || 'no MX';
-        const hasMx = e.has_mx_record ? 'yes' : 'no';
-        const spf = e.checks?.spf || 'unknown';
-        const dmarc = e.checks?.dmarc || 'unknown';
-        const catchAll = e.checks?.catch_all ? 'yes' : 'no';
-        const reason = e.reason || '';
-        const detail = e.smtp_detail || '';
-        return `<div class="contact-card">
-          <div class="contact-value">${escapeHtml(email)}</div>
-          <div class="contact-meta">Score: ${escapeHtml(String(score))} · Credibility: ${escapeHtml(credibility)} · Deliverability: ${escapeHtml(deliverability)}</div>
-          <div class="contact-meta">SMTP: ${escapeHtml(smtpStatus)} (${escapeHtml(detail)}) · MX: ${escapeHtml(mxHost)} · SPF: ${escapeHtml(spf)} · DMARC: ${escapeHtml(dmarc)} · Catch-all: ${catchAll}</div>
-          ${reason ? `<div class="contact-meta">${escapeHtml(reason)}</div>` : ''}
-        </div>`;
-      }).join('');
-    }
-
-    function renderCrawlPhones(phones) {
-      const el = $('contactResults');
-      if (!phones.length) return;
-      const phonesHtml = phones.map((p) => {
-        const raw = p.raw || '';
-        const credibility = p.credibility || 'unknown';
-        const valid = p.is_valid ? 'valid' : 'invalid';
-        const possible = p.is_possible ? 'possible' : 'not possible';
-        const numType = p.number_type || 'unknown';
-        const region = p.region || '';
-        const carrier = p.carrier || '';
-        const e164 = p.parsed_e164 || '';
-        return `<div class="contact-card">
-          <div class="contact-value">${escapeHtml(raw)}</div>
-          <div class="contact-meta">Credibility: ${escapeHtml(credibility)} · Validity: ${valid} · Possible: ${possible} · Type: ${escapeHtml(numType)}</div>
-          <div class="contact-meta">E164: ${escapeHtml(e164)} · Region: ${escapeHtml(region)} · Carrier: ${escapeHtml(carrier)}</div>
-        </div>`;
-      }).join('');
-      el.insertAdjacentHTML('beforeend', phonesHtml);
-    }
-
-    $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
-      if (!state.latestCrawl) return;
-      setBusy($('addSuppliersFromCrawlBtn'), true);
-      try {
-        const result = await api('/api/ai/suppliers/from-crawl', { crawl_result: state.latestCrawl });
-        addCrawlEvent('suppliers_added', `${result.suppliers?.length || 0} suppliers added to database`);
-        setStatus('Suppliers added', false);
-      } catch (exc) {
-        addCrawlEvent('error', 'Failed to add suppliers: ' + (exc.message || String(exc)));
-      } finally {
-        setBusy($('addSuppliersFromCrawlBtn'), false);
-      }
     });
 
     function renderWorkflowResult(result) {
@@ -882,7 +720,130 @@ Total HT: 12500 TND</textarea></div>
       setJson($('quoteOutput'), parsed);
     });
 
-    const messageEl = document.createElement('div');
+    function renderVerifiedContacts(payload) {
+      const emails = payload?.verified_emails || [];
+      const phones = payload?.verified_phones || [];
+      const summary = payload?.pages?.[0]?.contact_verification?.summary || payload?.summary || {};
+
+      const emailCards = emails.map((email) => {
+        const score = Number(email.score || 0);
+        return `
+          <div class="contact-card">
+            <div>
+              <div class="contact-value">${escapeHtml(email.email)}</div>
+              <div class="contact-score">
+                <div class="score-line"><span>Score email</span><span>${score}/100</span></div>
+                <div class="score-bar"><div class="score-fill" style="width: ${score}%"></div></div>
+                <div class="contact-meta">${escapeHtml(email.reason || '')}</div>
+              </div>
+              <div class="contact-meta">syntax: ${email.syntax_valid} · MX: ${email.has_mx_record ?? 'n/a'} · SMTP: ${email.smtp_status || 'skipped'} · SPF: ${(email.checks || {}).spf || 'n/a'} · DMARC: ${(email.checks || {}).dmarc || 'n/a'}</div>
+            </div>
+            <span class="badge ${badgeClass(email.credibility)}">${escapeHtml(email.credibility)}</span>
+          </div>
+        `;
+      }).join('');
+
+      const phoneCards = phones.map((phone) => `
+        <div class="contact-card">
+          <div>
+            <div class="contact-value">${escapeHtml(phone.raw)}</div>
+            <div class="contact-meta">${escapeHtml(phone.parsed_e164 || 'non formaté')} · ${escapeHtml(phone.number_type || 'unknown')} · ${escapeHtml(phone.region || '')}</div>
+          </div>
+          <span class="badge ${badgeClass(phone.credibility)}">${escapeHtml(phone.credibility)}</span>
+        </div>
+      `).join('');
+
+      if (!emailCards && !phoneCards) {
+        $('contactResults').innerHTML = `<div class="muted">${escapeHtml(JSON.stringify(summary))}</div>`;
+        return;
+      }
+
+      $('contactResults').innerHTML = `
+        <div class="panel-title" style="margin-bottom: 10px;">Emails vérifiés</div>
+        ${emailCards || '<div class="muted">Aucun email vérifié.</div>'}
+        <div class="panel-title" style="margin: 18px 0 10px;">Téléphones vérifiés</div>
+        ${phoneCards || '<div class="muted">Aucun téléphone vérifié.</div>'}
+      `;
+    }
+
+    $('crawlForm').addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) return;
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      state.socket = new WebSocket(`${protocol}://${location.host}/ws/crawl`);
+      $('events').innerHTML = '';
+      $('eventCount').textContent = '0 événements';
+      state.eventCount = 0;
+      state.latestCrawl = null;
+      $('crawlOutput').textContent = '// Crawl en cours…';
+      $('addSuppliersFromCrawlBtn').disabled = true;
+      setBusy($('startBtn'), true);
+      setStatus('WebSocket connected', true);
+      state.socket.addEventListener('open', () => {
+        state.socket.send(JSON.stringify({
+          url: $('url').value,
+          max_pages: Number($('maxPages').value),
+          delay_seconds: Number($('delaySeconds').value),
+          phone_default_region: $('region').value,
+          timeout_seconds: Number($('timeoutSeconds').value),
+          same_domain_only: $('sameDomain').checked,
+          verify_contacts: $('verifyContacts').checked,
+          smtp_verify: $('smtpVerify').checked,
+          deep_email_verify: $('deepEmailVerify').checked,
+        }));
+      });
+      state.socket.addEventListener('message', (event) => handleCrawlEvent(JSON.parse(event.data)));
+      state.socket.addEventListener('close', () => { setStatus('WebSocket closed', false); setBusy($('startBtn'), false); });
+      state.socket.addEventListener('error', () => { setStatus('WebSocket error', false); setBusy($('startBtn'), false); });
+    });
+
+    function addEvent(type, payload) {
+      state.eventCount += 1;
+      $('eventCount').textContent = `${state.eventCount} événements`;
+      const li = document.createElement('li');
+      li.className = 'event';
+      li.innerHTML = `<div class="event-time">${new Date().toLocaleTimeString('fr-FR', { hour12: false })}</div><div><div class="event-kind">${escapeHtml(type)}</div><div class="event-detail">${escapeHtml(JSON.stringify(payload || {}).slice(0, 420))}</div></div>`;
+      $('events').prepend(li);
+      while ($('events').children.length > 120) $('events').lastElementChild.remove();
+    }
+
+    function handleCrawlEvent(message) {
+      const { type, payload } = message;
+      addEvent(type, payload);
+      if (type === 'crawl_completed' || type === 'result') {
+        state.latestCrawl = payload;
+        setJson($('crawlOutput'), payload);
+        $('addSuppliersFromCrawlBtn').disabled = false;
+        renderVerifiedContacts(payload);
+      }
+      if (type === 'verification_completed') {
+        renderVerifiedContacts(payload || {});
+      }
+    }
+
+$('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
+      if (!state.latestCrawl) return;
+      setBusy($('addSuppliersFromCrawlBtn'), true);
+      const result = await api('/api/ai/suppliers/from-crawl', { crawl_result: state.latestCrawl });
+      setJson($('crawlOutput'), { crawl: state.latestCrawl, added_suppliers: result, saved_in_database: true });
+      setBusy($('addSuppliersFromCrawlBtn'), false);
+    });
+
+    const chatState = { messages: [], init: false, workflowResult: null, conversations: [] };
+    function renderSupplierQuick(suppliers, indexOffset) {
+      if (!suppliers || !suppliers.length) return '';
+      return suppliers.map((s, idx) => {
+        const sup = s.supplier || {};
+        const matchIndex = indexOffset + idx;
+        return `<div class="result-card" style="margin-top: 8px; padding: 8px; cursor: pointer;" data-supplier-index="${matchIndex}">
+          <div class="contact-value">${escapeHtml(sup.name || 'Unknown')}</div>
+          <div class="contact-meta">Match: ${s.score || 'N/A'} · ${escapeHtml((sup.categories || []).join(', ') || 'No category')}</div>
+        </div>`;
+      }).join('');
+    }
+
+    function renderChatMessage(role, content, card, filePreview, rfq, ragContext) {
+      const messageEl = document.createElement('div');
       messageEl.className = 'contact-card';
       messageEl.style.marginBottom = '12px';
       const isUser = role === 'user';
@@ -972,8 +933,8 @@ Total HT: 12500 TND</textarea></div>
           }
         });
       });
-    
-  
+    }
+
     function handleActionCard(action, workflow) {
       if (action === 'create_rfq' || action === 'compare_suppliers') {
         $('needText').value = workflow.need_text || '';
@@ -1016,27 +977,15 @@ Total HT: 12500 TND</textarea></div>
         });
         html += '</div>';
       }
-$('chatMessages').insertAdjacentHTML('beforeend', html);
+      $('chatMessages').insertAdjacentHTML('beforeend', html);
     }
 
-    $('chatMode').addEventListener('change', () => {
-      const mode = $('chatMode').value;
-      const modeText = mode === 'ocr' ? 'OCR Mode (Extract RFQ)' : 'RAG Mode (Knowledge base)';
-      $('modeText').textContent = modeText;
-      $('modeIndicator').style.display = 'block';
-    });
-
-    $('uploadBtn').addEventListener('click', () => {
-      $('chatFile').click();
-    });
-
-    $('chatForm').addEventListener('submit', async (e) => {
+$('chatForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const input = $('chatInput').value.trim();
       const file = $('chatFile').files?.[0];
-      const mode = $('chatMode').value;
       if (!input && !file) return;
-      chatState.messages.push({role: 'user', content: input || `Uploaded: ${file?.name}`, mode});
+      chatState.messages.push({role: 'user', content: input || `Uploaded: ${file?.name}`});
       saveChatHistory();
 
       let filePreview = null;
@@ -1045,17 +994,16 @@ $('chatMessages').insertAdjacentHTML('beforeend', html);
           name: file.name,
           type: file.type,
           url: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
-          size: (file.size / 1024).toFixed(1) + ' KB',
-          mode
+          size: (file.size / 1024).toFixed(1) + ' KB'
         };
       }
-      renderChatMessage('user', input || `Uploaded: ${file?.name}`, null, filePreview);
+      renderChatMessage('user', input || `Uploaded: ${file.name}`, null, filePreview);
 
       $('chatInput').value = '';
       setBusy($('chatSendBtn'), true);
       $('chatStatus').textContent = 'Thinking...';
 
-      const payload = { mode };
+      const payload = {};
       if (input) payload.message = input;
       if (file) {
         const base64 = await fileToBase64(file);
@@ -1144,9 +1092,6 @@ $('chatMessages').insertAdjacentHTML('beforeend', html);
     async function initChat() {
       const stats = await (await fetch('/api/ai/database/stats')).json();
       $('chatSupplierCount').textContent = stats.suppliers || 0;
-      const mode = $('chatMode').value;
-      $('modeText').textContent = mode === 'ocr' ? 'OCR Mode (Extract RFQ)' : 'RAG Mode (Knowledge base)';
-      $('modeIndicator').style.display = 'block';
       loadChatHistory();
       chatState.init = true;
     }
