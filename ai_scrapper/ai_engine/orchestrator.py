@@ -4,14 +4,17 @@ import base64
 from pathlib import Path
 from typing import Any
 
+from .analytics import execute_analytics_query, get_dashboard_metrics
+from .erp import create_purchase_order, erp_provider_status, sync_inventory_update, sync_supplier_to_erp
+from .negotiation import analyze_negotiation
 from .ocr import extract_text_from_bytes as _extract_text_from_bytes
 from .quotes import compare_quotes, parse_quotes
 from .rag import add_rfq_document, init_rag_db
 from .reporting import generate_report
-from .rfq import RFQ, extract_rfq, extract_rfq_with_llm
+from .rfq import RfqItem, RFQ, extract_rfq, extract_rfq_with_llm
 from .risk import assess_risk
 from .database import ProcurementDatabase
-from .schemas import SupplierProfile, to_jsonable
+from .schemas import NegotiationResult, PurchaseOrder, to_jsonable
 from .suppliers import SupplierStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,7 +80,10 @@ class ProcurementAIEngine:
         rfq = RFQ(
             title=rfq_payload.get("title") or "Procurement request",
             description=rfq_payload.get("description") or "",
-            items=[item if isinstance(item, dict) else item.to_dict() for item in rfq_payload.get("items", [])],
+            items=[
+            item if isinstance(item, RfqItem) else RfqItem(**item)
+            for item in rfq_payload.get("items", [])
+        ],
             location=rfq_payload.get("location") or "",
             budget=rfq_payload.get("budget"),
             currency=rfq_payload.get("currency") or "TND",
@@ -161,12 +167,18 @@ class ProcurementAIEngine:
             comparison_ids.append(self.db.save_quote_comparison(comparison, rfq_id=rfq_id, quote_id=quote_id))
         self.db.save_risk(rfq_id, risk, matches, quote_comparisons)
         report = generate_report(rfq_payload, matches, quote_comparisons, risk)
+        negotiation = self.analyze_negotiation(rfq_payload, matches, quote_comparisons)
+        best_supplier = matches[0]["supplier"] if matches else {}
+        best_quote = quote_comparisons[0]["quote"] if quote_comparisons else {}
+        erp_po = self.erp_create_po(rfq_payload, best_supplier, [best_quote] if best_quote else [], provider="odoo") if best_supplier and best_quote else {}
         return {
             "rfq": rfq_payload,
             "supplier_matches": matches,
             "parsed_quotes": parsed_quotes,
             "quote_comparisons": quote_comparisons,
             "risk": risk,
+            "negotiation": negotiation,
+            "erp_po": erp_po,
             "report": report,
             "database": {
                 "rfq_id": rfq_id,
@@ -181,11 +193,31 @@ class ProcurementAIEngine:
             },
         }
 
+    def erp_create_po(self, rfq: dict[str, Any], supplier: dict[str, Any], quotes: list[dict[str, Any]] | None = None, provider: str = "odoo") -> dict[str, Any]:
+        return create_purchase_order(rfq, supplier, quotes, provider)
+
+    def erp_sync_supplier(self, supplier: dict[str, Any], provider: str = "odoo") -> dict[str, Any]:
+        return sync_supplier_to_erp(supplier, provider)
+
+    def erp_sync_inventory(self, rfq: dict[str, Any]) -> dict[str, Any]:
+        return sync_inventory_update(rfq, self.db.path)
+
+    def analytics_query(self, question: str) -> dict[str, Any]:
+        return execute_analytics_query(self.db.path, question)
+
+    def dashboard(self) -> dict[str, Any]:
+        return get_dashboard_metrics(self.db.path)
+
+    def analyze_negotiation(self, rfq_payload: dict[str, Any], supplier_matches: list[dict[str, Any]] | None = None, quote_comparisons: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return analyze_negotiation(rfq_payload, supplier_matches, quote_comparisons)
+
     def _rfq_from_payload(self, payload: dict[str, Any]) -> RFQ:
+        items_data = payload.get("items") or []
+        items = [item if isinstance(item, RfqItem) else RfqItem(**item) for item in items_data]
         return RFQ(
             title=payload.get("title") or "Procurement request",
             description=payload.get("description") or "",
-            items=payload.get("items") or [],
+            items=items,
             location=payload.get("location") or "",
             budget=payload.get("budget"),
             currency=payload.get("currency") or "TND",
@@ -197,6 +229,59 @@ class ProcurementAIEngine:
             extracted_by=payload.get("extracted_by") or "api",
             confidence=float(payload.get("confidence") or 0.8),
         )
+
+
+    def select_best_offer(
+        self,
+        rfq_payload: dict[str, Any],
+        quote_comparisons: list[dict[str, Any]],
+        supplier_matches: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        best_cmp = quote_comparisons[0] if quote_comparisons else {}
+        best_quote = best_cmp.get("quote", {})
+        supplier_name = best_quote.get("supplier_name") or best_quote.get("supplier", "Unknown")
+        supplier_id = best_quote.get("supplier_id") or ""
+
+        match = None
+        if supplier_matches:
+            for m in supplier_matches:
+                sup = m.get("supplier") or {}
+                if sup.get("name") == supplier_name or sup.get("id") == supplier_id:
+                    match = m
+                    break
+
+        supplier = (match or {}).get("supplier") or {}
+        contacts = supplier.get("contacts") or {}
+        emails = contacts.get("emails") or []
+        phones = contacts.get("phones") or []
+
+        negotiation = self.analyze_negotiation(rfq_payload, supplier_matches, quote_comparisons)
+        suggestions = negotiation.get("suggestions") or []
+        relevant_suggestion = suggestions[0] if suggestions else {}
+
+        decision = {
+            "selected_rank": 1,
+            "quote_comparison": best_cmp,
+            "quote": best_quote,
+            "supplier": supplier,
+            "match_score": (match or {}).get("score"),
+            "final_score": best_cmp.get("final_score"),
+            "coverage": best_cmp.get("coverage_score"),
+            "price_score": best_cmp.get("price_score"),
+            "delivery_score": best_cmp.get("delivery_score"),
+            "contacts": {"emails": emails, "phones": phones},
+            "negotiation_insight": {
+                "offered_per_unit": relevant_suggestion.get("offered_price_per_unit"),
+                "counter_offer": relevant_suggestion.get("counter_offer"),
+                "savings_pct": relevant_suggestion.get("savings_pct"),
+                "market_range": relevant_suggestion.get("market_range"),
+                "tactics": relevant_suggestion.get("tactics") or [],
+                "recommendation": relevant_suggestion.get("recommendation"),
+                "rationale": relevant_suggestion.get("rationale"),
+            },
+            "rfq": rfq_payload,
+        }
+        return decision
 
 
 engine = ProcurementAIEngine()

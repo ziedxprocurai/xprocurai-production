@@ -139,6 +139,7 @@
       <button class="tab active" data-tab="workflow">AI Workflow</button>
       <button class="tab" data-tab="crawler">Supplier Discovery</button>
       <button class="tab" data-tab="quotes">Quotes & Risk</button>
+      <button class="tab" data-tab="negotiate">Negotiate</button>
       <button class="tab" data-tab="chat">AI Copilot</button>
     </section>
 
@@ -252,7 +253,38 @@ Total HT: 12500 TND</textarea></div>
       </div>
     </section>
 
-<section id="chat" class="tab-panel">
+    <section id="negotiate" class="tab-panel">
+      <div style="margin-bottom: 18px;">
+        <div class="section-title" style="margin-bottom: 8px;">Professional Negotiation Workflow</div>
+        <div class="hint">Step 1: Enter RFQ → Step 2: Paste supplier offers → Step 3: AI analyzes prices, benchmarks, and delivery → Step 4: Select best offer and contact supplier.</div>
+      </div>
+      <div class="layout">
+        <aside class="panel">
+          <div class="panel-header"><h2 class="panel-title">Input</h2></div>
+          <div class="panel-body">
+            <div class="field"><label for="rfqSummary">Step 1 — RFQ / Need</label><textarea id="rfqSummary" placeholder="e.g. I need 500 office chairs in Tunis, budget 12000 TND, delivery within 15 days.">I need 500 ergonomic office chairs in Tunis, budget 125000 TND, delivery within 15 days.</textarea></div>
+            <div class="field"><label for="negotiateQuotes">Step 2 — Supplier offer(s)</label><textarea id="negotiateQuotes" placeholder="Paste supplier quotes with prices..." style="min-height: 180px;">Tunis Office Solutions
+Chaise bureau ergonomique 500 pcs 22 TND
+Livraison 12 jours
+Total HT: 11000 TND
+
+IT Hub Maghreb
+Chaise bureau 500 pcs 24 TND
+Livraison 15 jours
+Total HT: 12000 TND</textarea></div>
+            <button class="primary" id="negotiateBtn" type="button">Analyze offers & negotiate</button>
+          </div>
+        </aside>
+        <section>
+          <div id="negotiateMetrics" class="metrics" style="display: none;"></div>
+          <div id="negotiateResults"></div>
+          <div id="bestOfferSection" style="display: none; margin-top: 18px;"></div>
+          <article class="panel raw-json" style="margin-top: 18px;"><div class="panel-header"><h2 class="panel-title">Raw analysis</h2></div><div class="panel-body"><pre class="json" id="negotiateOutput">// Run negotiation analysis to see structured results.</pre></div></article>
+        </section>
+      </div>
+    </section>
+
+    <section id="chat" class="tab-panel">
       <div class="layout">
         <aside class="panel">
           <div class="panel-header"><h2 class="panel-title">Context & Quick Actions</h2></div>
@@ -267,6 +299,9 @@ Total HT: 12500 TND</textarea></div>
               <button class="secondary" type="button" data-prompt="Compare suppliers for laptops">Compare Suppliers</button>
               <button class="secondary" type="button" data-prompt="Check available suppliers in stock">Check Stock</button>
               <button class="secondary" type="button" data-prompt="Analyze risk for my procurement">Analyze Risk</button>
+              <button class="secondary" type="button" data-prompt="Show me procurement dashboard">Procurement Dashboard</button>
+              <button class="secondary" type="button" data-prompt="How much did we spend last year?">Spend Analysis</button>
+              <button class="secondary" type="button" data-prompt="Which supplier has the best performance?">Best Supplier</button>
             </div>
           </div>
         </aside>
@@ -327,8 +362,8 @@ Total HT: 12500 TND</textarea></div>
 
     function badgeClass(value) {
       const v = String(value || '').toLowerCase();
-      if (['high', 'valid', 'completed', 'confirmed', 'low'].includes(v)) return 'high';
-      if (['medium', 'unknown', 'likely', 'uncertain', 'risky'].includes(v)) return 'medium';
+      if (['high', 'valid', 'completed', 'confirmed', 'low', 'accept'].includes(v)) return 'high';
+      if (['medium', 'unknown', 'likely', 'uncertain', 'risky', 'negotiate'].includes(v)) return 'medium';
       return 'rejected';
     }
 
@@ -810,7 +845,9 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
 
     const chatState = { messages: [], workflowResult: null };
 
-    function renderChatMessage(role, content, fileInfo, card, rfq, ragContext) {
+    function renderChatMessage(role, content, fileInfo, card, rfq, ragContext, dashboardData) {
+      if (!dashboardData && card && card.dashboard) dashboardData = card.dashboard;
+      if (!dashboardData && card && card.query && card.query.rows) dashboardData = card.query;
       const messageEl = document.createElement('div');
       messageEl.className = 'contact-card';
       messageEl.style.marginBottom = '12px';
@@ -821,6 +858,7 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
       }
 
       let rfqHtml = '';
+      let dashboardHtml = '';
       if (rfq) {
         const items = (rfq.items || []).map((item) =>
           `<div class="contact-card" style="margin-top: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--line);">
@@ -835,6 +873,30 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
             <div class="contact-meta">${rfq.budget ? formatMoney(rfq.budget, rfq.currency) : 'Budget n/a'} · Location: ${escapeHtml(rfq.location || 'n/a')}</div>
             <div class="section-title" style="margin-top: 8px;">Items</div>
             ${items || '<div class="muted">No items extracted.</div>'}
+          </div>
+        `;
+      }
+      if (card && card.action === 'analytics') {
+        const d = (card.dashboard || {});
+        const q = (card.query || {});
+        const rows = q.rows || [];
+        dashboardHtml = `
+          <div style="margin-top: 10px; padding: 10px; border-radius: 10px; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.18);">
+            <div class="panel-title" style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #58a6ff;">Procurement Analytics</div>
+            <div class="summary-grid" style="margin-top: 10px;">
+              <div class="summary-card"><div class="summary-label">Total spend</div><div class="summary-value">${formatMoney(d.total_spend, 'TND')}</div></div>
+              <div class="summary-card"><div class="summary-label">Quotes</div><div class="summary-value">${d.total_quotes ?? 'n/a'}</div></div>
+              <div class="summary-card"><div class="summary-label">Suppliers</div><div class="summary-value">${d.total_suppliers ?? 'n/a'}</div></div>
+              <div class="summary-card"><div class="summary-label">Avg quote</div><div class="summary-value">${formatMoney(d.average_quote_amount, 'TND')}</div></div>
+            </div>
+            <div class="summary-grid" style="margin-top: 10px;">
+              <div class="summary-card"><div class="summary-label">Top supplier</div><div class="summary-value">${escapeHtml((d.top_supplier || {}).supplier_name || 'n/a')}</div></div>
+              <div class="summary-card"><div class="summary-label">Top spend</div><div class="summary-value">${formatMoney((d.top_supplier || {}).total, 'TND')}</div></div>
+              <div class="summary-card"><div class="summary-label">Avg risk</div><div class="summary-value">${d.average_risk_score ?? 'n/a'}/100</div></div>
+              <div class="summary-card"><div class="summary-label">RFQs</div><div class="summary-value">${d.total_rfqs ?? 'n/a'}</div></div>
+            </div>
+            ${(d.monthly_spend || []).length ? `<div class="section-title" style="margin-top: 10px;">Monthly spend</div><div class="card-list">${(d.monthly_spend || []).map(m => `<div class="result-card"><div class="contact-value">${escapeHtml(m.month || '')}</div><div class="contact-meta">${formatMoney(m.total, 'TND')}</div></div>`).join('')}</div>` : ''}
+            ${rows.length ? `<div class="section-title" style="margin-top: 10px;">Query result</div><pre class="json" style="max-height: 200px; overflow: auto; font-size: 11px;">${escapeHtml(JSON.stringify(rows, null, 2))}</pre>` : ''}
           </div>
         `;
       }
@@ -860,6 +922,7 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
             <div class="contact-value" style="font-size: 14px;">${escapeHtml(content)}</div>
             ${fileHtml}
             ${rfqHtml}
+            ${dashboardHtml}
             ${actionHtml}
           </div>
         </div>
@@ -912,9 +975,9 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
       const result = await api('/api/ai/chat', payload);
       setBusy($('chatSendBtn'), false);
       $('chatStatus').textContent = 'Ready';
-      chatState.messages.push({role: 'assistant', content: result.response, rfq: result.rfq, extracted_text: result.extracted_text, action_card: result.action_card});
+      chatState.messages.push({role: 'assistant', content: result.response, rfq: result.rfq, extracted_text: result.extracted_text, action_card: result.action_card, dashboard: result.dashboard_data});
       saveChatHistory();
-      renderChatMessage('assistant', result.response, null, result.action_card, result.rfq, result.rag_context);
+      renderChatMessage('assistant', result.response, null, result.action_card, result.rfq, result.rag_context, result.dashboard_data);
     });
 
     const voiceBtn = $('voiceBtn');
@@ -990,7 +1053,7 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
             if (m.role === 'user') {
               renderChatMessage('user', m.content, m.file);
             } else if (m.role === 'assistant') {
-              renderChatMessage('assistant', m.content, null, m.action_card, m.rfq, m.rag_context);
+              renderChatMessage('assistant', m.content, null, m.action_card, m.rfq, m.rag_context, m.dashboard);
             } else if (m.role === 'workflow_result') {
               chatState.workflowResult = m.data;
               renderWorkflowInChat(m.data);
@@ -1007,6 +1070,189 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
       loadChatHistory();
     }
     initChat();
+
+    $('negotiateBtn').addEventListener('click', async () => {
+      const rfqText = $('rfqSummary').value.trim();
+      const quotesText = $('negotiateQuotes').value.trim();
+      if (!rfqText || !quotesText) { alert('Please enter both RFQ and supplier quotes.'); return; }
+      setBusy($('negotiateBtn'), true);
+      setStatus('Analyzing offers…', true);
+      try {
+        const rfqRes = await api('/api/ai/rfq/extract', { text: rfqText, use_llm: false });
+        const quoteParts = quotesText.split(/\n\s*\n+/).map((part, i) => ({ supplier_name: `Offer ${i + 1}`, text: part }));
+        // Try to name suppliers from the text
+        quoteParts.forEach((q, i) => {
+          const firstLine = (q.text || '').split('\n')[0].trim();
+          if (firstLine && firstLine.length < 60) q.supplier_name = firstLine;
+        });
+        const cmpRes = await api('/api/ai/quotes/compare', { rfq: rfqRes, quotes: quoteParts });
+        const comparisons = cmpRes.comparisons || [];
+        const matchRes = await api('/api/ai/suppliers/match', { rfq: rfqRes, top_k: 5 });
+        const bestRes = await api('/api/ai/negotiate/best-offer', {
+          rfq: rfqRes,
+          quote_comparisons: comparisons,
+          supplier_matches: matchRes.matches,
+        });
+        const negRes = await api('/api/ai/negotiate', { rfq: rfqRes, quote_comparisons: comparisons, supplier_matches: matchRes.matches });
+
+        setJson($('negotiateOutput'), { rfq: rfqRes, comparisons, best_offer: bestRes, negotiation: negRes });
+        renderNegotiationWorkflow(rfqRes, comparisons, bestRes, negRes);
+      } catch (e) {
+        console.error(e);
+        alert('Analysis failed. Check the JSON output for details.');
+      }
+      setBusy($('negotiateBtn'), false);
+      setStatus('Ready', false);
+    });
+
+    function renderNegotiationWorkflow(rfq, comparisons, best, negotiation) {
+      const metrics = $('negotiateMetrics');
+      metrics.style.display = 'grid';
+      metrics.innerHTML = `
+        <div class="metric"><div class="metric-value">${(rfq.items || []).length}</div><div class="metric-label">RFQ items</div></div>
+        <div class="metric"><div class="metric-value">${comparisons.length}</div><div class="metric-label">Offers received</div></div>
+        <div class="metric"><div class="metric-value">${negotiation.total_items_analyzed}</div><div class="metric-label">Items analyzed</div></div>
+        <div class="metric"><div class="metric-value" style="color: var(--green);">${negotiation.savings_pct}%</div><div class="metric-label">Potential savings</div></div>
+      `;
+
+      const results = $('negotiateResults');
+      results.innerHTML = '';
+
+      // Comparison table
+      const tableCard = document.createElement('article');
+      tableCard.className = 'panel';
+      tableCard.style.marginTop = '18px';
+      tableCard.innerHTML = `
+        <div class="panel-header"><h2 class="panel-title">Offer comparison</h2><span class="muted">${comparisons.length} offers ranked</span></div>
+        <div class="panel-body" style="overflow-x: auto;">
+          <table class="offer-table">
+            <thead><tr><th>Rank</th><th>Supplier</th><th>Total</th><th>Delivery</th><th>Coverage</th><th>Price</th><th>Final score</th><th>Decision</th></tr></thead>
+            <tbody>
+              ${comparisons.map((c, i) => {
+                const q = c.quote || {};
+                const isBest = i === 0;
+                const badge = isBest ? 'high' : (c.final_score >= 45 ? 'medium' : 'rejected');
+                const label = isBest ? 'BEST OFFER' : (c.final_score >= 45 ? 'Acceptable' : 'Reject');
+                return `
+                  <tr style="${isBest ? 'background: rgba(52, 211, 153, 0.06);' : ''}">
+                    <td><span class="badge ${badge}">${label}</span></td>
+                    <td><div class="contact-value">${escapeHtml(q.supplier_name || 'Unknown')}</div></td>
+                    <td>${formatMoney(q.total_amount, q.currency)}</td>
+                    <td>${q.delivery_days ? q.delivery_days + ' days' : 'n/a'}</td>
+                    <td>${Math.round((c.coverage_score || 0) * 100)}%</td>
+                    <td>${c.price_score ?? 'n/a'}</td>
+                    <td><strong>${c.final_score ?? 'n/a'}</strong></td>
+                    <td><button class="secondary" type="button" onclick="selectOffer(${i})" style="font-size: 12px; padding: 6px 10px;">Select</button></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      results.appendChild(tableCard);
+
+      // Best offer section
+      renderBestOffer(best, negotiation);
+    }
+
+    function selectOffer(index) {
+      // In a real app this would open a modal or switch view. For now we just re-render best offer section with clicked offer.
+      // We simulate by re-running the best-offer logic client-side using the cached data.
+      const output = $('negotiateOutput').textContent;
+      try {
+        const data = JSON.parse(output);
+        if (data.comparisons && data.comparisons[index]) {
+          const fakeBest = {
+            quote: data.comparisons[index].quote,
+            supplier: {},
+            match_score: null,
+            final_score: data.comparisons[index].final_score,
+            coverage: data.comparisons[index].coverage_score,
+            price_score: data.comparisons[index].price_score,
+            delivery_score: data.comparisons[index].delivery_score,
+            contacts: { emails: [], phones: [] },
+            negotiation_insight: {
+              offered_per_unit: data.negotiation?.suggestions?.[0]?.offered_price_per_unit,
+              counter_offer: data.negotiation?.suggestions?.[0]?.counter_offer,
+              savings_pct: data.negotiation?.suggestions?.[0]?.savings_pct,
+              market_range: data.negotiation?.suggestions?.[0]?.market_range,
+              tactics: data.negotiation?.suggestions?.[0]?.tactics || [],
+              recommendation: data.negotiation?.suggestions?.[0]?.recommendation,
+              rationale: data.negotiation?.suggestions?.[0]?.rationale,
+            },
+            rfq: data.rfq,
+          };
+          renderBestOffer(fakeBest, data.negotiation);
+        }
+      } catch (e) { console.error(e); }
+    }
+
+    function renderBestOffer(best, negotiation) {
+      const section = $('bestOfferSection');
+      section.style.display = 'block';
+      const q = best.quote || {};
+      const insight = best.negotiation_insight || {};
+      const emails = (best.contacts?.emails || []);
+      const phones = (best.contacts?.phones || []);
+      const supplierName = q.supplier_name || 'Selected supplier';
+      const supplierData = best.supplier || {};
+
+      section.innerHTML = `
+        <article class="panel" style="border-color: rgba(52, 211, 153, 0.35); background: linear-gradient(180deg, rgba(17, 26, 43, 0.98), rgba(10, 15, 25, 0.98));">
+          <div class="panel-header" style="background: rgba(52, 211, 153, 0.08);">
+            <h2 class="panel-title" style="color: #34d399;">Selected best offer</h2>
+            <span class="badge high">Recommendation: ${escapeHtml((insight.recommendation || 'negotiate').toUpperCase())}</span>
+          </div>
+          <div class="panel-body">
+            <div class="summary-grid">
+              <div class="summary-card"><div class="summary-label">Supplier</div><div class="summary-value">${escapeHtml(supplierName)}</div></div>
+              <div class="summary-card"><div class="summary-label">Total amount</div><div class="summary-value">${formatMoney(q.total_amount, q.currency)}</div></div>
+              <div class="summary-card"><div class="summary-label">Delivery</div><div class="summary-value">${q.delivery_days ? q.delivery_days + ' days' : 'n/a'}</div></div>
+              <div class="summary-card"><div class="summary-label">Payment</div><div class="summary-value">${escapeHtml(q.payment_terms || 'Not specified')}</div></div>
+              <div class="summary-card"><div class="summary-label">Final score</div><div class="summary-value">${best.final_score ?? 'n/a'}/100</div></div>
+              <div class="summary-card"><div class="summary-label">Match score</div><div class="summary-value">${best.match_score ?? 'n/a'}/100</div></div>
+            </div>
+
+            ${insight.offered_per_unit ? `
+            <div style="margin-top: 18px;" class="section-title">Negotiation insight</div>
+            <div class="summary-grid">
+              <div class="summary-card"><div class="summary-label">Offered / unit</div><div class="summary-value">${formatMoney(insight.offered_per_unit, q.currency || 'TND')}</div></div>
+              <div class="summary-card"><div class="summary-label">Counter offer / unit</div><div class="summary-value" style="color: var(--green);">${formatMoney(insight.counter_offer, q.currency || 'TND')}</div></div>
+              <div class="summary-card"><div class="summary-label">Potential savings</div><div class="summary-value" style="color: var(--green);">${insight.savings_pct ?? 0}%</div></div>
+              ${insight.market_range ? `<div class="summary-card"><div class="summary-label">Market range</div><div class="summary-value">${formatMoney(insight.market_range.low, q.currency || 'TND')} – ${formatMoney(insight.market_range.high, q.currency || 'TND')}</div></div>` : ''}
+            </div>
+            <div class="contact-meta" style="margin-top: 8px;">${escapeHtml(insight.rationale || '')}</div>
+            <div class="check-grid" style="margin-top: 10px;">
+              ${(insight.tactics || []).map(t => `<span class="mini-badge">${escapeHtml(t)}</span>`).join('')}
+            </div>
+            ` : ''}
+
+            <div style="margin-top: 18px;" class="section-title">Supplier contact</div>
+            <div class="contact-list" style="max-height: none;">
+              ${emails.length ? emails.map(e => `
+                <div class="contact-card">
+                  <div><div class="contact-value">${escapeHtml(e)}</div></div>
+                  <button class="secondary" type="button" style="font-size: 11px; padding: 4px 8px; margin-top: 4px;" onclick="navigator.clipboard.writeText('${escapeHtml(e)}'); this.textContent='Copied';">Copy</button>
+                </div>
+              `).join('') : '<div class="muted">No verified email available. Contact via website: ' + escapeHtml(supplierData.website || '') + '</div>'}
+              ${phones.length ? phones.map(p => `
+                <div class="contact-card">
+                  <div><div class="contact-value">${escapeHtml(p.raw || p)}</div><div class="contact-meta">${escapeHtml(p.parsed_e164 || p.number_type || '')}</div></div>
+                  <button class="secondary" type="button" style="font-size: 11px; padding: 4px 8px; margin-top: 4px;" onclick="navigator.clipboard.writeText('${escapeHtml(p.raw || p)}'); this.textContent='Copied';">Copy</button>
+                </div>
+              `).join('') : ''}
+            </div>
+
+            <div style="margin-top: 18px; display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="primary" type="button" onclick="alert('Purchase order creation would be triggered here in production.')">Create purchase order</button>
+              <button class="secondary" type="button" onclick="alert('RFQ email to supplier would be composed here.')">Send RFQ to supplier</button>
+              <button class="secondary" type="button" onclick="alert('Counter-offer email would be composed here.')">Send counter-offer</button>
+            </div>
+          </div>
+        </article>
+      `;
+    }
 
     setStatus('Ready');
   </script>

@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 import asyncio
-import base64
+import logging
+import os
+import time
 from pathlib import Path
-from dotenv import load_dotenv
 from typing import Any
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
-
+from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ai_engine import engine
 from ai_engine.chatbot import process_chat_message, process_chat_with_image, process_with_rag
 from ai_engine.database import ProcurementDatabase
+from ai_engine.models import (
+    AnalyticsQueryRequest,
+    ERPCreatePORequest,
+    ERPSyncSupplierRequest,
+    NegotiationRequest,
+    QuoteModel,
+    RFQModel,
+    SupplierProfileModel,
+)
 from ai_engine.ocr import extract_text_from_bytes
 from ai_engine.rag import (
     init_rag_db,
@@ -30,10 +40,30 @@ from crawler_service import run_crawl
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("procurement_ai")
+
 app = FastAPI(title="AI Procurement Platform")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    elapsed = time.time() - start
+    logger.info("%s %s -> %d (%dms)", request.method, request.url.path, response.status_code, int(elapsed * 1000))
+    return response
 
 
 @app.get("/")
@@ -52,30 +82,32 @@ async def ai_schema():
         "workflow": {
             "need_text": "I need 500 office chairs in Tunis, budget 12000 TND, delivery within 15 days",
             "suppliers": [],
-            "quotes": [
-                {
-                    "supplier_name": "Tunis Office Solutions",
-                    "text": "Tunis Office Solutions\nChaise bureau ergonomique 500 pcs 22 TND\nLivraison 12 jours\nTotal HT: 11000 TND",
-                }
-            ],
+            "quotes": [{"supplier_name": "Tunis Office Solutions", "text": "Tunis Office Solutions\nChaise bureau ergonomique 500 pcs 22 TND\nLivraison 12 jours\nTotal HT: 11000 TND"}],
             "delivery": {"promised_days": 12},
             "invoices": [],
             "top_k": 5,
             "use_llm": False,
         },
-        "quote_parse": {
-            "quotes": [
-                {"supplier_name": "Supplier A", "text": "Laptop Dell 20 pcs 1800 TND\nTotal: 36000 TND\nLivraison 10 jours"}
-            ]
-        },
+        "quote_parse": {"quotes": [{"supplier_name": "Supplier A", "text": "Laptop Dell 20 pcs 1800 TND\nTotal: 36000 TND\nLivraison 10 jours"}]},
         "risk": {
             "rfq": {"title": "Office chairs", "items": [{"name": "Office chair", "quantity": 500}], "delivery_deadline_days": 15},
             "supplier_matches": [],
             "quote_comparisons": [],
             "delivery": {"promised_days": 20},
-            "invoices": [
-                {"invoice_number": "INV-001", "amount": 12000, "quote_total": 11000, "po_reference": "PO-100", "supplier_is_new": False, "bank_account_changed": False, "duplicate_invoice": False}
-            ],
+            "invoices": [{"invoice_number": "INV-001", "amount": 12000, "quote_total": 11000, "po_reference": "PO-100", "supplier_is_new": False, "bank_account_changed": False, "duplicate_invoice": False}],
+        },
+        "negotiate": {
+            "rfq": {"title": "Office chairs", "items": [{"name": "Office chair", "quantity": 500}], "currency": "TND"},
+            "supplier_matches": [],
+            "quote_comparisons": [],
+        },
+        "analytics": {"question": "How much did we spend on packaging last year?", "question_fr": "Combien avons-nous depense en emballage l'annee derniere ?"},
+        "erp": {
+            "action": "create_po",
+            "rfq": {"title": "Office chairs", "items": [{"name": "Office chair", "quantity": 500}], "currency": "TND"},
+            "supplier": {"name": "Tunis Office Solutions", "categories": ["office furniture"], "contacts": {"emails": ["contact@tunisoffice.tn"]}},
+            "quotes": [{"supplier_name": "Tunis Office Solutions", "total_amount": 11000, "currency": "TND", "lines": [{"description": "Chaise bureau ergonomique", "quantity": 500, "unit_price": 22}]}],
+            "provider": "odoo",
         },
     }
 
@@ -131,10 +163,14 @@ async def parse_quotes(payload: dict[str, Any]):
 
 
 @app.post("/api/ai/quotes/compare")
-async def compare_quotes(payload: dict[str, Any]):
-    rfq = payload.get("rfq") or {}
-    quotes = payload.get("quotes") or []
-    return {"comparisons": engine.compare_quotes(rfq, quotes)}
+async def compare_quotes_endpoint(payload: dict[str, Any]):
+    try:
+        rfq = payload.get("rfq") or {}
+        quotes = payload.get("quotes") or []
+        return {"comparisons": engine.compare_quotes(rfq, quotes)}
+    except Exception as exc:
+        logger.exception("compare quotes failed")
+        return {"comparisons": [], "error": str(exc)}
 
 
 @app.post("/api/ai/risk")
@@ -148,6 +184,63 @@ async def assess_risk(payload: dict[str, Any]):
     )
 
 
+@app.post("/api/ai/negotiate")
+async def negotiate(payload: dict[str, Any]):
+    rfq = payload.get("rfq") or {}
+    supplier_matches = payload.get("supplier_matches") or []
+    quote_comparisons = payload.get("quote_comparisons") or []
+    return engine.analyze_negotiation(rfq, supplier_matches, quote_comparisons)
+
+
+@app.post("/api/ai/negotiate/best-offer")
+async def negotiate_best_offer(payload: dict[str, Any]):
+    rfq = payload.get("rfq") or {}
+    quote_comparisons = payload.get("quote_comparisons") or []
+    supplier_matches = payload.get("supplier_matches") or []
+    return engine.select_best_offer(rfq, quote_comparisons, supplier_matches)
+
+
+@app.post("/api/ai/analytics/query")
+async def analytics_query(payload: dict[str, Any]):
+    question = payload.get("question") or payload.get("query") or ""
+    if not question:
+        return {"error": "question is required"}
+    return engine.analytics_query(question)
+
+
+@app.get("/api/ai/analytics/dashboard")
+async def analytics_dashboard():
+    return engine.dashboard()
+
+
+@app.get("/api/ai/erp/providers")
+async def erp_providers():
+    from ai_engine.erp import erp_provider_status
+    return erp_provider_status()
+
+
+@app.post("/api/ai/erp/sync-supplier")
+async def erp_sync_supplier(payload: dict[str, Any]):
+    supplier = payload.get("supplier") or {}
+    provider = payload.get("provider") or "odoo"
+    return engine.erp_sync_supplier(supplier, provider)
+
+
+@app.post("/api/ai/erp/create-po")
+async def erp_create_po(payload: dict[str, Any]):
+    rfq = payload.get("rfq") or {}
+    supplier = payload.get("supplier") or {}
+    quotes = payload.get("quotes") or []
+    provider = payload.get("provider") or "odoo"
+    return engine.erp_create_po(rfq, supplier, quotes, provider)
+
+
+@app.post("/api/ai/erp/sync-inventory")
+async def erp_sync_inventory(payload: dict[str, Any]):
+    rfq = payload.get("rfq") or {}
+    return engine.erp_sync_inventory(rfq)
+
+
 @app.post("/api/ai/workflow")
 async def run_workflow(payload: dict[str, Any]):
     try:
@@ -157,12 +250,13 @@ async def run_workflow(payload: dict[str, Any]):
         if image_payload or pdf_payload:
             raw = image_payload or pdf_payload
             if isinstance(raw, str):
-                content = base64.b64decode(raw)
+                content = __import__("base64").b64decode(raw)
                 filename = "upload.png" if image_payload else "upload.pdf"
                 extracted_text = extract_text_from_bytes(content, filename=filename)
                 workflow_payload["need_text"] = extracted_text or workflow_payload.get("need_text", "")
         return engine.run_workflow(workflow_payload)
     except Exception as exc:
+        logger.exception("workflow failed")
         return {"error": str(exc)}
 
 
@@ -193,13 +287,14 @@ async def rag_process(file: UploadFile = File(...)):
     try:
         content = await file.read()
         filename = file.filename or "upload"
-        image_b64 = base64.b64encode(content).decode("utf-8")
+        image_b64 = __import__("base64").b64encode(content).decode("utf-8")
         if filename.lower().endswith(".pdf"):
             result = process_with_rag("", pdf_base64=image_b64)
         else:
             result = process_with_rag("", image_base64=image_b64)
         return {"success": True, "filename": filename, **result}
     except Exception as exc:
+        logger.exception("rag process failed")
         return {"success": False, "error": str(exc)}
 
 
@@ -210,6 +305,7 @@ async def ocr_extract(file: UploadFile = File(...)):
         text = extract_text_from_bytes(content, filename=file.filename or "upload")
         return {"text": text, "filename": file.filename}
     except Exception as exc:
+        logger.exception("ocr extract failed")
         return {"text": "", "error": str(exc)}
 
 
@@ -232,13 +328,14 @@ async def rag_search(payload: dict[str, Any]):
             "supplier_knowledge": supplier_results,
         }
     except Exception as exc:
+        logger.exception("rag search failed")
         return {"rfq_knowledge": [], "supplier_knowledge": [], "error": str(exc)}
 
 
 @app.post("/api/ai/rag/add-rfq")
 async def rag_add_rfq(payload: dict[str, Any]):
     text = payload.get("text") or ""
-    doc_id = payload.get("doc_id") or f"rfq_{asyncio.get_event_loop().time()}"
+    doc_id = payload.get("doc_id") or f"rfq_{time.time()}"
     metadata = payload.get("metadata") or {}
     ok = add_rfq_document(text, metadata, doc_id)
     return {"success": ok, "doc_id": doc_id}
@@ -247,7 +344,7 @@ async def rag_add_rfq(payload: dict[str, Any]):
 @app.post("/api/ai/rag/add-supplier")
 async def rag_add_supplier(payload: dict[str, Any]):
     text = payload.get("text") or ""
-    doc_id = payload.get("doc_id") or f"supplier_{asyncio.get_event_loop().time()}"
+    doc_id = payload.get("doc_id") or f"supplier_{time.time()}"
     metadata = payload.get("metadata") or {}
     ok = add_supplier_document(text, metadata, doc_id)
     return {"success": ok, "doc_id": doc_id}
@@ -264,6 +361,7 @@ async def rag_stats():
             "supplier_knowledge": supplier_count,
         }
     except Exception as exc:
+        logger.exception("rag stats failed")
         return {"rfq_knowledge": 0, "supplier_knowledge": 0, "error": str(exc)}
 
 
@@ -271,7 +369,7 @@ async def rag_stats():
 async def crawl_ws(websocket: WebSocket):
     await websocket.accept()
     running = False
-    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    queue: asyncio.Queue = asyncio.Queue()
     closed = False
 
     async def sender():
@@ -287,8 +385,9 @@ async def crawl_ws(websocket: WebSocket):
     def emit(kind: str, payload: dict[str, Any] | None = None):
         queue.put_nowait({"type": kind, "payload": payload or {}})
 
-    sender_task = asyncio.create_task(sender())
+    sender_task = None
     try:
+        sender_task = asyncio.ensure_future(sender())
         while True:
             message = await websocket.receive_json()
             if running:
@@ -300,6 +399,7 @@ async def crawl_ws(websocket: WebSocket):
                 result = await asyncio.to_thread(run_crawl, message, emit=emit)
                 queue.put_nowait({"type": "result", "payload": result.to_dict()})
             except Exception as exc:
+                logger.exception("crawl failed")
                 queue.put_nowait({"type": "error", "payload": {"message": str(exc)}})
             finally:
                 running = False
@@ -307,10 +407,15 @@ async def crawl_ws(websocket: WebSocket):
         closed = True
         return
     except Exception as exc:
-        queue.put_nowait({"type": "error", "payload": {"message": str(exc)}})
+        logger.exception("crawl ws error")
+        try:
+            queue.put_nowait({"type": "error", "payload": {"message": str(exc)}})
+        except Exception:
+            pass
     finally:
         closed = True
-        sender_task.cancel()
+        if sender_task:
+            sender_task.cancel()
 
 
 if __name__ == "__main__":

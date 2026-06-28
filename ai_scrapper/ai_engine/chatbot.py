@@ -23,14 +23,11 @@ def chat_with_groq(messages: list[dict[str, str]], system_prompt: str | None = N
     client = get_groq_client()
     if not client["api_key"]:
         return None
-
     payload_messages = []
     if system_prompt:
         payload_messages.append({"role": "system", "content": system_prompt})
     for msg in messages:
-        payload_msg = {"role": msg["role"], "content": msg["content"]}
-        payload_messages.append(payload_msg)
-
+        payload_messages.append({"role": msg["role"], "content": msg["content"]})
     try:
         response = requests.post(
             f"{client['base_url']}/chat/completions",
@@ -45,10 +42,10 @@ def chat_with_groq(messages: list[dict[str, str]], system_prompt: str | None = N
 
 
 INTENT_KEYWORDS = {
-    "check_stock": ["stock", "inventaire", "disponible", "available", "inventory", "check", "fournisseurs disponibles", "liste fournisseurs"],
+    "check_stock": ["stock", "inventaire", "disponible", "available", "inventory", "fournisseurs disponibles", "liste fournisseurs"],
     "compare_suppliers": ["compare", "comparing", "supplier", "fournisseur", "meilleure offre", "meilleur prix", "best offer", "best price"],
     "analyze_risk": ["risque", "risk", "danger", "fraude", "fraud", "analyser risque"],
-    "dashboard": ["dashboard", "dashbord", "graphique", "chart", "visualiser", "comparer", "comparison", "stats"],
+    "analytics_spend": ["spend", "spent", "dépens", "budget", "cost", "montant", "total", "combien", "analytics", "dashboard", "dashbord", "graphique", "chart", "visualiser", "comparer", "comparison", "stats", "performances", "performance", "fournisseur", "supplier", "dernier", "année", "month", "mois", "monthly", "trend"],
     "ocr_process": ["upload", "ocr", "scan", "image", "pdf", "document", "fichier", "télécharger"],
 }
 
@@ -67,12 +64,6 @@ def detect_intent(text: str, has_file: bool = False) -> str:
 
 def format_action_cards(intent: str, result: Any = None, workflow_payload: dict[str, Any] = None) -> dict[str, Any]:
     cards = {
-        "dashboard": {
-            "title": "Dashboard",
-            "description": "View analytics and comparison charts.",
-            "action": "dashboard",
-            "result": result,
-        },
         "create_requisition": {
             "title": "Create Requisition",
             "description": "Start a new procurement request from natural language.",
@@ -97,6 +88,12 @@ def format_action_cards(intent: str, result: Any = None, workflow_payload: dict[
             "action": "check_budget",
             "result": result,
         },
+        "analyze_risk": {
+            "title": "Risk Analysis",
+            "description": "AI-powered risk assessment and fraud detection.",
+            "action": "analyze_risk",
+            "result": result,
+        },
         "ocr_process": {
             "title": "OCR Process",
             "description": "Extracted RFQ from image/PDF document.",
@@ -104,9 +101,15 @@ def format_action_cards(intent: str, result: Any = None, workflow_payload: dict[
             "result": result,
         },
         "rag_process": {
-            "title": "RAG Knowledge Processing",
-            "description": "Analyzed document and stored knowledge in RAG.",
+            "title": "RAG Knowledge",
+            "description": "Analyzed document and stored in knowledge base.",
             "action": "rag_query",
+            "result": result,
+        },
+        "analytics_spend": {
+            "title": "Spend Analytics",
+            "description": "Procurement spend analysis and BI dashboard.",
+            "action": "analytics",
             "result": result,
         },
     }
@@ -133,8 +136,6 @@ def _decode_base64_content(content_b64: str, default_ext: str) -> tuple[bytes | 
 
 
 def _analyze_document_with_llm(extracted_text: str, message: str = "") -> dict[str, Any]:
-    import json
-
     analysis_prompt = f"""Analyze the following document content and extract structured procurement information.
 Extract items, quantities, budget, location, and other relevant details for RFQ creation.
 
@@ -191,7 +192,7 @@ def process_with_rag(
     if image_base64:
         image_content, image_filename = _decode_base64_content(image_base64, ".png")
     elif pdf_base64:
-        pdf_content, pdf_filename = _decode_base64_content(pdf_base64, ".pdf")
+        pdf_content, pdf_filename = _decode_base64_content(pdf_b64, ".pdf")
 
     content = image_content or pdf_content
     actual_filename = image_filename if image_content else pdf_filename
@@ -510,7 +511,7 @@ Be helpful, concise, and suggest relevant actions.
     if first_item.get("name"):
         response += f"Found {first_item.get('name')} with {first_item.get('quantity', 'N/A')} quantity. "
     if rag_context.get("similar_rfqs"):
-        response += f"Found {len(rag_context['similar_rfqs'])} similar historical RFQs for reference."
+        response += f"Found {len(rag_context['similar_rfqs'])} similar historical RFQs."
 
     card = format_action_cards("ocr_process", result, {"need_text": extracted_text, "top_k": 5})
     if llm_response:
@@ -542,6 +543,31 @@ def format_rag_results(results: list[dict], result_type: str) -> str:
             meta = r.get("metadata", {})
             lines.append(f"- {meta.get('name', 'Unknown')} (score: {score:.2f})")
     return "\n".join(lines)
+
+
+def _format_money(value: float | None, currency: str = "") -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):,.2f} {currency}".strip()
+
+
+def _format_dashboard(data: dict[str, Any]) -> str:
+    parts = []
+    if "total_spend" in data:
+        parts.append(f"Total spend: {_format_money(data['total_spend'], data.get('currency', 'TND'))}")
+    if "total_quotes" in data:
+        parts.append(f"{data['total_quotes']} quotes processed")
+    if "total_suppliers" in data:
+        parts.append(f"{data['total_suppliers']} suppliers in catalog")
+    if "average_quote_amount" in data and data["average_quote_amount"]:
+        parts.append(f"Average quote: {_format_money(data['average_quote_amount'], data.get('currency', 'TND'))}")
+    if "top_supplier" in data and data["top_supplier"]:
+        parts.append(f"Top supplier: {data['top_supplier'].get('supplier_name', 'n/a')} ({_format_money(data['top_supplier'].get('total'), data.get('currency', 'TND'))})")
+    if "average_risk_score" in data and data["average_risk_score"] is not None:
+        parts.append(f"Avg risk score: {data['average_risk_score']}/100")
+    if "monthly_spend" in data and data["monthly_spend"]:
+        parts.append("Monthly trend available")
+    return ". ".join(parts) if parts else "Dashboard ready."
 
 
 def process_chat_message(message: str, ai_engine: Any = None) -> dict[str, Any]:
@@ -582,17 +608,45 @@ Be helpful, concise, and suggest relevant actions.
         return {"intent": intent, "response": f"Found {context['supplier_count']} suppliers in the database. Showing top {len(suppliers)}.", "action_card": card}
 
     if intent == "check_budget":
-        if not any(word in message.lower() for word in ["chaise", "chair", "bureau", "desk", "laptop", "ordinateur", "fourniture", "papeterie"]):
-            card = format_action_cards(intent, {"note": "Budget tracking is integrated with cost centers."})
-            return {"intent": intent, "response": "Budget context available for your procurement request.", "action_card": card}
+        card = format_action_cards(intent, {"note": "Budget tracking is integrated with cost centers."})
+        return {"intent": intent, "response": "Budget context available for your procurement request.", "action_card": card}
 
-    if intent == "dashboard":
-        rfq = ai_engine.extract_rfq(message, use_llm=False)
-        matches = ai_engine.match_suppliers(rfq, top_k=5)
-        workflow = ai_engine.run_workflow({"need_text": message, "top_k": 5})
-        card = format_action_cards(intent, workflow)
-        response = f"Dashboard generated for: {workflow.get('rfq', {}).get('title', 'Procurement')}."
-        return {"intent": intent, "response": response, "action_card": card, "dashboard_data": workflow}
+    if intent == "analytics_spend":
+        dashboard = ai_engine.dashboard()
+        question_lower = message.lower()
+        query_result = None
+        try:
+            query_result = ai_engine.analytics_query(message)
+        except Exception:
+            query_result = {"error": "Query failed"}
+
+        is_dashboard_request = any(kw in question_lower for kw in ["dashboard", "dashbord", "trend", "monthly", "month", "stats", "graphique", "visualiser", "overview", "summary", "vue d'ensemble", "résumé"])
+        if is_dashboard_request:
+            data = dashboard
+            summary = _format_dashboard(data)
+            response = f"Here is your procurement dashboard. {summary}"
+            card = format_action_cards(intent, data)
+            card["dashboard"] = data
+            card["query"] = query_result
+            return {"intent": intent, "response": response, "action_card": card, "dashboard_data": data}
+
+        if query_result and "rows" in query_result:
+            rows = query_result.get("rows") or []
+            row_count = len(rows)
+            summary = query_result.get("summary") or f"{row_count} record(s) found."
+            first = rows[0] if rows else {}
+            response = f"Here is your spend analysis. {summary}"
+            card = format_action_cards(intent, query_result)
+            card["query"] = query_result
+            card["dashboard"] = dashboard
+            return {"intent": intent, "response": response, "action_card": card, "dashboard_data": dashboard}
+
+        if query_result and "error" in query_result:
+            response = f"I couldn't analyze that query: {query_result['error']}. Try asking: 'How much did we spend?' or 'Which supplier performed best?'"
+            return {"intent": intent, "response": response, "action_card": format_action_cards(intent, query_result)}
+
+        response = "Use the analytics tool to see your KPIs."
+        return {"intent": intent, "response": response, "action_card": format_action_cards(intent, {"note": "Ask about spend, suppliers, risk, or trends."})}
 
     if intent == "analyze_risk":
         rfq = ai_engine.extract_rfq(message, use_llm=False)
@@ -620,4 +674,4 @@ Be helpful, concise, and suggest relevant actions.
         response += f"Found {first_item.get('name', 'items')} with {first_item.get('quantity', 'N/A')} quantity."
         return {"intent": "create_requisition", "response": response, "action_card": card}
 
-    return {"intent": intent, "response": "I can help you with procurement tasks. Try: 'I need 100 office chairs in Tunis under 5000 TND' or 'Compare suppliers for laptops'.", "action_card": format_action_cards(intent)}
+    return {"intent": intent, "response": "I can help with procurement. Try: 'How much did we spend last year?', 'Best performing suppliers', 'Create requisition for 500 chairs'.", "action_card": format_action_cards(intent)}

@@ -92,6 +92,77 @@ class Quote:
         return data
 
 
+@dataclass
+class NegotiationSuggestion:
+    item: str
+    quantity: int = 1
+    supplier: str = ""
+    offered_price_per_unit: float | None = None
+    currency: str = "TND"
+    market_range: dict[str, Any] | None = None
+    counter_offer: float | None = None
+    savings_pct: float = 0.0
+    tactics: list[str] = field(default_factory=list)
+    recommendation: str = "negotiate"
+    rationale: str = ""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class NegotiationResult:
+    rfq_title: str = ""
+    currency: str = "TND"
+    total_items_analyzed: int = 0
+    total_offered_amount: float = 0.0
+    total_counter_offer_amount: float = 0.0
+    potential_savings: float = 0.0
+    savings_pct: float = 0.0
+    overall_recommendation: str = "negotiate"
+    suggestions: list[dict[str, Any]] = field(default_factory=list)
+    summary: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ERPSyncLog:
+    record_id: str
+    provider: str
+    direction: str
+    action: str
+    model: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    status: str = "simulated"
+    message: str = ""
+    field_mappings: dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class PurchaseOrder:
+    id: str
+    rfq_title: str = ""
+    supplier_name: str = ""
+    supplier_id: str = ""
+    total_amount: float | None = None
+    currency: str = "TND"
+    delivery_days: int | None = None
+    payment_terms: str = ""
+    lines: list[dict[str, Any]] = field(default_factory=list)
+    model: str = "purchase.order"
+    created_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def to_jsonable(value: Any) -> Any:
     if hasattr(value, "to_dict"):
         return value.to_dict()
