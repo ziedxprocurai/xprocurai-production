@@ -145,7 +145,10 @@ def extract_text_from_bytes(content: bytes, filename: str = "upload") -> str:
         if image is None:
             return ""
         try:
-            return _extract_text_with_tesseract(image)
+            text = _extract_text_with_tesseract(image)
+            if not text:
+                return "[EMPTY_OCR]"
+            return text
         finally:
             try:
                 image.close()
@@ -156,7 +159,10 @@ def extract_text_from_bytes(content: bytes, filename: str = "upload") -> str:
         try:
             with open(temp_path, "wb") as f:
                 f.write(content)
-            return extract_text_from_pdf(temp_path)
+            text = extract_text_from_pdf(temp_path)
+            if not text:
+                return "[EMPTY_OCR]"
+            return text
         except Exception:
             return ""
         finally:

@@ -79,10 +79,12 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _build_embedding_function():
-    model_name = os.getenv("RAG_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-    st_fn = SentenceTransformerEmbeddingFunction(model_name)
-    if st_fn._model is not None:
-        return st_fn
+    use_st = os.getenv("RAG_USE_SENTENCE_TRANSFORMER", "").lower() in ("1", "true", "yes", "on")
+    if use_st:
+        model_name = os.getenv("RAG_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        st_fn = SentenceTransformerEmbeddingFunction(model_name)
+        if st_fn._model is not None:
+            return st_fn
     return TfEmbeddingFunction()
 
 

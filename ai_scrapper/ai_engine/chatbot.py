@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 from typing import Any
 
@@ -120,13 +121,12 @@ def _decode_base64_content(content_b64: str, default_ext: str) -> tuple[bytes | 
         content_b64 = content_b64.split(",", 1)[1]
     try:
         content = base64.b64decode(content_b64)
-        if "." not in default_ext:
-            if content[:4] == b"\x89PNG":
-                default_ext = ".png"
-            elif content[:2] == b"\xff\xd8":
-                default_ext = ".jpeg"
-            elif content[:4] == b"%PDF":
-                default_ext = ".pdf"
+        if content[:4] == b"\x89PNG":
+            default_ext = ".png"
+        elif content[:2] == b"\xff\xd8":
+            default_ext = ".jpeg"
+        elif content[:4] == b"%PDF":
+            default_ext = ".pdf"
         return content, f"upload{default_ext}"
     except Exception:
         return None, default_ext
@@ -200,10 +200,30 @@ def process_with_rag(
         return {"intent": "rag_process", "response": "No valid image or PDF content provided.", "action_card": format_action_cards("ocr_process")}
 
     extracted_text = extract_text_from_bytes(content, actual_filename)
+    vision_fallback = False
+    vision_result = None
     if not extracted_text:
         return {"intent": "rag_process", "response": "Could not extract text from the uploaded document.", "action_card": format_action_cards("ocr_process")}
+    if extracted_text.startswith("[EMPTY_OCR]"):
+        if image_base64:
+            image_base64_clean = image_base64.split(",", 1)[1] if "," in image_base64 else image_base64
+            vision_result = _extract_text_with_vision(image_base64_clean, message, filename=filename)
+            if vision_result and not vision_result.get("_error"):
+                vision_fallback = True
+                extracted_text = vision_result.get("raw_text") or ""
+                if not extracted_text:
+                    return {"intent": "rag_process", "response": "Vision model could not read any text from the image.", "action_card": format_action_cards("ocr_process")}
+            else:
+                err_msg = "Unknown vision error"
+                if vision_result and vision_result.get("_error"):
+                    err_msg = f"Vision failed ({vision_result.get('_error')})"
+                return {"intent": "rag_process", "response": f"OCR produced no text and vision fallback failed. {err_msg}.", "action_card": format_action_cards("ocr_process")}
+        else:
+            return {"intent": "rag_process", "response": "OCR produced no text for this PDF.", "action_card": format_action_cards("ocr_process")}
 
     llm_analysis = _analyze_document_with_llm(extracted_text, message)
+    if vision_fallback and vision_result:
+        llm_analysis = vision_result
 
     rfq = None
     if llm_analysis.get("items"):
@@ -246,6 +266,8 @@ def process_with_rag(
         response_parts.append(f"I've analyzed the document and extracted {len(item_names)} item(s): {', '.join(item_names[:3])}")
     else:
         response_parts.append("I've analyzed the document content and stored it in the knowledge base.")
+        if vision_fallback:
+            response_parts.append("(Used vision model because OCR was empty.)")
 
     if llm_analysis.get("budget"):
         response_parts.append(f"Detected budget: {llm_analysis.get('budget')} {llm_analysis.get('currency', 'TND')}.")
@@ -268,6 +290,78 @@ def process_with_rag(
         card["workflow_payload"]["rfq_data"] = rfq
 
     return {"intent": "rag_process", "response": " ".join(response_parts), "action_card": card, "extracted_text": extracted_text, "llm_analysis": llm_analysis, "rfq": rfq, "rag_context": {"similar_documents": similar_rag_docs}}
+
+
+def _extract_text_with_vision(image_base64: str, message: str = "", filename: str = "upload") -> dict | None:
+    try:
+        client = get_groq_client()
+        if not client["api_key"]:
+            return {"_error": "no_api_key"}
+        vision_model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+        system_prompt = """You are an OCR and document analysis assistant for a procurement platform.
+Extract all text from the image verbatim. If it looks like a purchase requisition or RFQ, also structure it as JSON:
+{
+  "title": "document title or subject",
+  "items": [{"name": "item", "quantity": number, "category": "category"}],
+  "budget": number or null,
+  "location": "city or country",
+  "currency": "TND",
+  "delivery_deadline_days": number or null,
+  "certifications": [],
+  "urgency": "normal",
+  "summary": "brief summary"
+}
+If no JSON is possible, just return the raw text."""
+        image_b64 = image_base64.split(",", 1)[1] if "," in image_base64 else image_base64
+        mime = "image/jpeg"
+        if image_base64.startswith("data:"):
+            mime = image_base64.split(";")[0].split(":", 1)[1]
+        else:
+            lower = filename.lower()
+            if lower.endswith(".png"):
+                mime = "image/png"
+            elif lower.endswith(".webp"):
+                mime = "image/webp"
+        payload = {
+            "model": vision_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": [
+                    {"type": "text", "text": message or "Extract all text from this image and convert to RFQ if possible."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_b64}"}}
+                ]}
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2048,
+        }
+        response = requests.post(
+            f"{client['base_url']}/chat/completions",
+            headers={"Authorization": f"Bearer {client['api_key']}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=180,
+        )
+        response.raise_for_status()
+        body = response.json()
+        choices = body.get("choices") or []
+        if choices:
+            content = choices[0]["message"]["content"]
+        else:
+            content = ""
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start != -1 and end > start:
+            try:
+                parsed = json.loads(content[start:end])
+                if isinstance(parsed, dict):
+                    parsed["raw_text"] = parsed.get("raw_text") or content
+                    return parsed
+            except Exception:
+                pass
+        if content and content.strip():
+            return {"raw_text": content.strip()}
+        return {"_error": "empty_response"}
+    except Exception as exc:
+        return {"_error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
 def process_chat_with_image(
@@ -297,10 +391,30 @@ def process_chat_with_image(
         return {"intent": "ocr_process", "response": "No valid image or PDF content provided.", "action_card": format_action_cards("ocr_process")}
 
     extracted_text = extract_text_from_bytes(content, actual_filename)
+    vision_fallback = False
+    vision_result = None
     if not extracted_text:
         return {"intent": "ocr_process", "response": "Could not extract text from the uploaded document.", "action_card": format_action_cards("ocr_process")}
+    if extracted_text.startswith("[EMPTY_OCR]"):
+        if image_base64:
+            image_base64_clean = image_base64.split(",", 1)[1] if "," in image_base64 else image_base64
+            vision_result = _extract_text_with_vision(image_base64_clean, message, filename=filename)
+            if vision_result and not vision_result.get("_error"):
+                vision_fallback = True
+                extracted_text = vision_result.get("raw_text") or ""
+                if not extracted_text:
+                    return {"intent": "ocr_process", "response": "Vision model could not read any text from the image.", "action_card": format_action_cards("ocr_process")}
+            else:
+                err_msg = "Unknown vision error"
+                if vision_result and vision_result.get("_error"):
+                    err_msg = f"Vision failed ({vision_result.get('_error')})"
+                return {"intent": "ocr_process", "response": f"OCR produced no text and vision fallback failed. {err_msg}.", "action_card": format_action_cards("ocr_process")}
+        else:
+            return {"intent": "ocr_process", "response": "OCR produced no text for this PDF.", "action_card": format_action_cards("ocr_process")}
 
     llm_analysis = _analyze_document_with_llm(extracted_text, message)
+    if vision_fallback and vision_result:
+        llm_analysis = vision_result
 
     rfq = None
     if llm_analysis.get("items"):
@@ -391,6 +505,8 @@ Be helpful, concise, and suggest relevant actions.
     }
 
     response = f"I've extracted text from your document and created a requisition: {rfq.get('title', 'Procurement')}. "
+    if vision_fallback:
+        response += "(Used vision model because OCR was empty.) "
     if first_item.get("name"):
         response += f"Found {first_item.get('name')} with {first_item.get('quantity', 'N/A')} quantity. "
     if rag_context.get("similar_rfqs"):

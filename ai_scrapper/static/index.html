@@ -274,17 +274,18 @@ Total HT: 12500 TND</textarea></div>
           <article class="panel" style="display: flex; flex-direction: column; height: 100%;">
             <div class="panel-header"><h2 class="panel-title">AI Copilot Chat</h2><span class="muted" id="chatStatus">Ready</span></div>
             <div class="panel-body" style="flex: 1; display: flex; flex-direction: column; min-height: 400px;">
-              <div id="chatPreview" style="display: none; margin-bottom: 8px; align-items: center; gap: 8px;">
-                <img id="chatPreviewImg" style="max-width: 100px; max-height: 70px; border-radius: 8px; border: 1px solid var(--line);">
-                <span id="chatPreviewName" class="hint"></span>
-              </div>
-              <input id="chatFile" type="file" accept="image/*,.pdf" style="margin-bottom: 8px; width: 100%;">
               <div id="chatMessages" class="contact-list" style="flex: 1; overflow-y: auto; margin-bottom: 12px; max-height: 400px;"></div>
               <form id="chatForm" style="display: flex; gap: 8px;">
+                <input id="chatFile" type="file" accept="image/*,.pdf" style="display: none;">
                 <input id="chatInput" type="text" placeholder="Ask about procurement, suppliers, quotes..." autocomplete="off" style="flex: 1;">
+                <button class="secondary" id="uploadBtn" type="button" title="Upload file" style="width: auto;">📎</button>
                 <button class="secondary" id="voiceBtn" type="button" title="Voice input" style="width: auto;">🎤</button>
                 <button class="primary" id="chatSendBtn" type="submit" style="width: auto;">Send</button>
               </form>
+              <div id="chatFilePreview" style="display: none; margin-top: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.03);">
+                <div id="chatFilePreviewContent" style="display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px;"></div>
+                <button class="secondary" id="removeFileBtn" type="button" style="margin-left: auto; padding: 4px 8px; font-size: 11px;">Remove</button>
+              </div>
             </div>
           </article>
         </section>
@@ -383,28 +384,6 @@ Total HT: 12500 TND</textarea></div>
       } else {
         preview.style.display = 'none';
         preview.src = '';
-      }
-    });
-
-    $('chatFile').addEventListener('change', async (event) => {
-      const file = event.target.files?.[0];
-      const preview = $('chatPreview');
-      const previewImg = $('chatPreviewImg');
-      const nameEl = $('chatPreviewName');
-      if (!file) {
-        preview.style.display = 'none';
-        previewImg.src = '';
-        nameEl.textContent = '';
-        return;
-      }
-      nameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
-      if (file.type.startsWith('image/')) {
-        previewImg.src = URL.createObjectURL(file);
-        previewImg.style.display = 'block';
-        preview.style.display = 'flex';
-      } else {
-        previewImg.style.display = 'none';
-        preview.style.display = 'flex';
       }
     });
 
@@ -829,203 +808,113 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
       setBusy($('addSuppliersFromCrawlBtn'), false);
     });
 
-    const chatState = { messages: [], init: false, workflowResult: null, conversations: [] };
-    function renderSupplierQuick(suppliers, indexOffset) {
-      if (!suppliers || !suppliers.length) return '';
-      return suppliers.map((s, idx) => {
-        const sup = s.supplier || {};
-        const matchIndex = indexOffset + idx;
-        return `<div class="result-card" style="margin-top: 8px; padding: 8px; cursor: pointer;" data-supplier-index="${matchIndex}">
-          <div class="contact-value">${escapeHtml(sup.name || 'Unknown')}</div>
-          <div class="contact-meta">Match: ${s.score || 'N/A'} · ${escapeHtml((sup.categories || []).join(', ') || 'No category')}</div>
-        </div>`;
-      }).join('');
-    }
+    const chatState = { messages: [], workflowResult: null };
 
-    function renderChatMessage(role, content, card, filePreview, rfq, ragContext) {
+    function renderChatMessage(role, content, fileInfo, card, rfq, ragContext) {
       const messageEl = document.createElement('div');
       messageEl.className = 'contact-card';
       messageEl.style.marginBottom = '12px';
       const isUser = role === 'user';
-      const workflowPayload = card?.workflow_payload ? JSON.stringify(card.workflow_payload).replace(/"/g, '&quot;') : '';
-      const supplierQuick = card?.result && card.action === 'compare_suppliers' ? renderSupplierQuick(card.result) : '';
-
-      let filePreviewHtml = '';
-      if (filePreview) {
-        if (filePreview.url) {
-          filePreviewHtml = `<div style="margin-top: 6px;"><img src="${filePreview.url}" style="max-width: 120px; max-height: 80px; border-radius: 8px; border: 1px solid var(--line);"></div>`;
-        }
-        filePreviewHtml += `<div class="contact-meta" style="margin-top: 4px;">${escapeHtml(filePreview.name)} (${escapeHtml(filePreview.size)})</div>`;
+      let fileHtml = '';
+      if (fileInfo) {
+        fileHtml = `<div class="contact-meta" style="margin-top: 6px; font-size: 12px;">📎 ${escapeHtml(fileInfo.name)} · ${(fileInfo.size / 1024).toFixed(1)} KB</div>`;
       }
 
       let rfqHtml = '';
       if (rfq) {
-        const items = (rfq.items || []).map((item) => `
-          <div class="contact-card" style="margin-bottom: 6px; background: rgba(255,255,255,0.02);">
-            <div class="contact-value" style="font-size: 13px;">${escapeHtml(item.name)}</div>
-            <div class="contact-meta">Qty: ${item.quantity ?? 'n/a'} ${item.unit || ''}</div>
-          </div>
-        `).join('');
+        const items = (rfq.items || []).map((item) =>
+          `<div class="contact-card" style="margin-top: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--line);">
+            <div class="contact-value" style="font-size: 13px;">${escapeHtml(item.name || 'Item')}</div>
+            <div class="contact-meta">Qty: ${item.quantity ?? 'n/a'} · Category: ${escapeHtml(item.category || 'n/a')}</div>
+          </div>`
+        ).join('');
         rfqHtml = `
           <div style="margin-top: 10px; padding: 10px; border-radius: 10px; background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.18);">
             <div class="panel-title" style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #34d399;">Extracted RFQ</div>
             <div class="contact-value" style="font-size: 13px;">${escapeHtml(rfq.title || 'Procurement')}</div>
-            <div class="contact-meta">${items || '<div class="muted">No items extracted</div>'}</div>
+            <div class="contact-meta">${rfq.budget ? formatMoney(rfq.budget, rfq.currency) : 'Budget n/a'} · Location: ${escapeHtml(rfq.location || 'n/a')}</div>
+            <div class="section-title" style="margin-top: 8px;">Items</div>
+            ${items || '<div class="muted">No items extracted.</div>'}
           </div>
         `;
       }
 
-      let ragHtml = '';
-      if (ragContext) {
-        const rfqs = ragContext.similar_rfqs || [];
-        const suppliers = ragContext.similar_suppliers || [];
-        ragHtml = `
-          <div style="margin-top: 10px; padding: 10px; border-radius: 10px; background: rgba(88, 166, 255, 0.06); border: 1px solid rgba(88, 166, 255, 0.18);">
-            <div class="panel-title" style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #58a6ff;">RAG Knowledge</div>
-            <div class="contact-meta" style="margin-bottom: 6px;">${rfqs.length} similar RFQs · ${suppliers.length} similar suppliers</div>
-            ${rfqs.length ? rfqs.slice(0, 3).map(r => {
-              const meta = r.metadata || {};
-              const score = r.distance != null ? Math.max(0, Math.round((1 - r.distance) * 100)) : 'n/a';
-              return `<div class="contact-meta" style="margin-bottom: 4px;">RFQ: ${escapeHtml(meta.title || 'Untitled')} (${score}%)</div>`;
-            }).join('') : ''}
-            ${suppliers.length ? suppliers.slice(0, 3).map(s => {
-              const meta = s.metadata || {};
-              const score = s.distance != null ? Math.max(0, Math.round((1 - s.distance) * 100)) : 'n/a';
-              return `<div class="contact-meta" style="margin-bottom: 4px;">Supplier: ${escapeHtml(meta.name || 'Unknown')} (${score}%)</div>`;
-            }).join('') : ''}
-          </div>
-        `;
+      let actionHtml = '';
+      if (card && card.action) {
+        const action = card.action;
+        const actionTitle = escapeHtml(card.title || 'Action');
+        let workflowAttr = '';
+        let workflowData = '';
+        if (card.workflow_payload) {
+          try {
+            const encoded = JSON.stringify(card.workflow_payload).replace(/"/g, '&quot;');
+            workflowAttr = `data-workflow="${escapeHtml(encoded)}"`;
+          } catch (e) {}
+        }
+        actionHtml += `<div style="margin-top: 10px;"><button class="secondary" type="button" data-action="${escapeHtml(action)}" ${workflowAttr}>${actionTitle}</button></div>`;
       }
 
       messageEl.innerHTML = `
         <div style="display: flex; justify-content: ${isUser ? 'flex-end' : 'flex-start'};">
           <div style="max-width: 80%; background: ${isUser ? 'rgba(88, 166, 255, 0.15)' : 'rgba(255, 255, 255, 0.035)'}; border-radius: 12px; padding: 10px 12px;">
             <div class="contact-value" style="font-size: 14px;">${escapeHtml(content)}</div>
-            ${filePreviewHtml}
-            ${supplierQuick}
+            ${fileHtml}
             ${rfqHtml}
-            ${ragHtml}
-            ${card && card.action ? `<div style="margin-top: 8px;"><button class="secondary" type="button" data-action="${escapeHtml(card.action)}" data-workflow="${workflowPayload}">${escapeHtml(card.title)}</button></div>` : ''}
+            ${actionHtml}
           </div>
         </div>
       `;
       $('chatMessages').appendChild(messageEl);
       $('chatMessages').scrollTop = $('chatMessages').scrollHeight;
+
       const actionBtn = messageEl.querySelector('button[data-action]');
       if (actionBtn) {
         actionBtn.addEventListener('click', () => {
           const action = actionBtn.dataset.action;
           try {
-            const workflow = actionBtn.dataset.workflow ? JSON.parse(actionBtn.dataset.workflow.replace(/&quot;/g, '"')) : {};
+            const workflowAttr = actionBtn.dataset.workflow;
+            const workflow = workflowAttr ? JSON.parse(workflowAttr.replace(/&quot;/g, '"')) : {};
             handleActionCard(action, workflow);
           } catch (e) {
             handleActionCard(action, {});
           }
         });
       }
-      const supplierCards = messageEl.querySelectorAll('[data-supplier-index]');
-      supplierCards.forEach(card => {
-        card.addEventListener('click', () => {
-          const idx = parseInt(card.dataset.supplierIndex);
-          const result = chatState.workflowResult;
-          if (result && result.supplier_matches && result.supplier_matches[idx]) {
-            openSupplierModal(idx);
-          }
-        });
-      });
     }
 
-    function handleActionCard(action, workflow) {
-      if (action === 'create_rfq' || action === 'compare_suppliers') {
-        $('needText').value = workflow.need_text || '';
-        runChatWorkflow();
-      }
-    }
-
-    async function runChatWorkflow() {
-      const needText = $('needText').value;
-      if (!needText) return;
-      $('runWorkflowBtn').disabled = true;
-      $('chatStatus').textContent = 'Running workflow...';
-      const result = await api('/api/ai/workflow', { need_text: needText, top_k: 5 });
-      chatState.workflowResult = result;
-      $('workflowOutput').textContent = JSON.stringify(result, null, 2);
-      document.querySelector('.tab[data-tab="workflow"]').click();
-      $('runWorkflowBtn').disabled = false;
-      $('chatStatus').textContent = 'Ready';
-      chatState.messages.push({role: 'workflow_result', data: result});
-      renderWorkflowInChat(result);
-    }
-
-    function renderWorkflowInChat(result) {
-      let html = '<div style="margin-top: 12px;"><div class="panel-title">Workflow Results</div>';
-      html += `<div class="result-card" style="margin-top: 8px;">
-        <div class="contact-value">RFQ: ${escapeHtml(result.rfq?.title || 'N/A')}</div>
-        <div class="contact-meta">Items: ${result.rfq?.items?.length || 0} · Matches: ${result.supplier_matches?.length || 0}</div>
-      </div>`;
-      if (result.supplier_matches && result.supplier_matches.length) {
-        html += '<div class="panel-title" style="margin-top: 12px;">Supplier Scores Chart</div>';
-        html += '<div style="margin-top: 8px; max-height: 120px; overflow-y: auto;">';
-        result.supplier_matches.slice(0, 5).forEach((m, i) => {
-          const pct = Math.min(100, (m.score || 0) * 2);
-          html += `<div style="margin-bottom: 6px;">
-            <div style="font-size: 11px; color: var(--muted);">${escapeHtml((m.supplier?.name || '?').substring(0, 20))}</div>
-            <div style="height: 16px; background: rgba(255,255,255,0.04); border-radius: 8px; overflow: hidden;">
-              <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, var(--blue), var(--cyan));"></div>
-            </div>
-          </div>`;
-        });
-        html += '</div>';
-      }
-      $('chatMessages').insertAdjacentHTML('beforeend', html);
-    }
-
-$('chatForm').addEventListener('submit', async (e) => {
+    $('chatForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const input = $('chatInput').value.trim();
       const file = $('chatFile').files?.[0];
       if (!input && !file) return;
-      chatState.messages.push({role: 'user', content: input || `Uploaded: ${file?.name}`});
+      
+      const fileInfo = file ? { name: file.name, size: file.size, type: file.type } : null;
+      const userContent = input || `Uploaded: ${file?.name}`;
+      
+      chatState.messages.push({role: 'user', content: userContent, file: fileInfo});
       saveChatHistory();
-
-      let filePreview = null;
-      if (file) {
-        filePreview = {
-          name: file.name,
-          type: file.type,
-          url: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
-          size: (file.size / 1024).toFixed(1) + ' KB'
-        };
-      }
-      renderChatMessage('user', input || `Uploaded: ${file.name}`, null, filePreview);
-
+      renderChatMessage('user', userContent, fileInfo);
       $('chatInput').value = '';
+      hideChatFilePreview();
       setBusy($('chatSendBtn'), true);
       $('chatStatus').textContent = 'Thinking...';
-
-      const payload = {};
-      if (input) payload.message = input;
+      
+      const payload = { message: input };
       if (file) {
         const base64 = await fileToBase64(file);
-        if (file.type.startsWith('image/')) {
-          payload.image = base64;
-        } else if (file.type === 'application/pdf') {
-          payload.pdf = base64;
-        }
+        payload.file = {
+          name: file.name,
+          type: file.type,
+          data: base64
+        };
       }
-
+      
       const result = await api('/api/ai/chat', payload);
       setBusy($('chatSendBtn'), false);
       $('chatStatus').textContent = 'Ready';
-      $('chatFile').value = '';
-      $('chatPreview').style.display = 'none';
-
-      const rfq = result.rfq || null;
-      const ragContext = result.rag_context || null;
-
-      chatState.messages.push({role: 'assistant', content: result.response, card: result.action_card, rfq, ragContext});
+      chatState.messages.push({role: 'assistant', content: result.response, rfq: result.rfq, extracted_text: result.extracted_text, action_card: result.action_card});
       saveChatHistory();
-      renderChatMessage('assistant', result.response, result.action_card, null, rfq, ragContext);
+      renderChatMessage('assistant', result.response, null, result.action_card, result.rfq, result.rag_context);
     });
 
     const voiceBtn = $('voiceBtn');
@@ -1049,6 +938,38 @@ $('chatForm').addEventListener('submit', async (e) => {
       recognition.start();
     });
 
+    $('uploadBtn').addEventListener('click', () => $('chatFile').click());
+    
+    $('chatFile').addEventListener('change', (event) => {
+      const file = event.target.files?.[0];
+      const preview = $('chatFilePreview');
+      const previewContent = $('chatFilePreviewContent');
+      if (!file) {
+        hideChatFilePreview();
+        return;
+      }
+      previewContent.innerHTML = `
+        <span>📎 ${escapeHtml(file.name)}</span>
+        <span style="color: var(--muted);">(${(file.size / 1024).toFixed(1)} KB)</span>
+        <img id="chatFileThumb" style="max-height: 40px; max-width: 60px; border-radius: 6px; display: ${file.type.startsWith('image/') ? 'block' : 'none'};">
+      `;
+      const thumb = $('chatFileThumb');
+      if (thumb && file.type.startsWith('image/')) {
+        thumb.src = URL.createObjectURL(file);
+      }
+      preview.style.display = 'flex';
+      preview.style.justifyContent = 'space-between';
+      preview.style.alignItems = 'center';
+    });
+    
+    $('removeFileBtn').addEventListener('click', hideChatFilePreview);
+    
+    function hideChatFilePreview() {
+      $('chatFile').value = '';
+      $('chatFilePreview').style.display = 'none';
+      $('chatFilePreviewContent').innerHTML = '';
+    }
+
     document.querySelectorAll('.suggested-prompts button').forEach(btn => {
       btn.addEventListener('click', () => {
         $('chatInput').value = btn.dataset.prompt;
@@ -1067,9 +988,9 @@ $('chatForm').addEventListener('submit', async (e) => {
           const messages = JSON.parse(saved);
           messages.forEach(m => {
             if (m.role === 'user') {
-              renderChatMessage('user', m.content);
+              renderChatMessage('user', m.content, m.file);
             } else if (m.role === 'assistant') {
-              renderChatMessage('assistant', m.content, m.card, null, m.rfq, m.rag_context);
+              renderChatMessage('assistant', m.content, null, m.action_card, m.rfq, m.rag_context);
             } else if (m.role === 'workflow_result') {
               chatState.workflowResult = m.data;
               renderWorkflowInChat(m.data);
@@ -1080,20 +1001,10 @@ $('chatForm').addEventListener('submit', async (e) => {
       }
     }
 
-    const newChatBtn = $('newChatBtn');
-    if (newChatBtn) {
-      newChatBtn.addEventListener('click', () => {
-        chatState.messages = [];
-        chatState.workflowResult = null;
-        $('chatMessages').innerHTML = '';
-      });
-    }
-
     async function initChat() {
       const stats = await (await fetch('/api/ai/database/stats')).json();
       $('chatSupplierCount').textContent = stats.suppliers || 0;
       loadChatHistory();
-      chatState.init = true;
     }
     initChat();
 

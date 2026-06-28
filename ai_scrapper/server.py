@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import base64
 from pathlib import Path
+from dotenv import load_dotenv
 from typing import Any
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -169,6 +172,15 @@ async def chat_endpoint(payload: dict[str, Any]):
     image = payload.get("image")
     pdf = payload.get("pdf")
     mode = payload.get("mode")
+    file_info = payload.get("file")
+    if file_info and isinstance(file_info, dict):
+        file_type = (file_info.get("type") or "").lower()
+        file_data = file_info.get("data")
+        if file_data:
+            if file_type.endswith("pdf"):
+                pdf = pdf or file_data
+            else:
+                image = image or file_data
     if image or pdf:
         if mode == "rag":
             return process_with_rag(message, image_base64=image, pdf_base64=pdf)
