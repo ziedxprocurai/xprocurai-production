@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shadow Audit | xProcurAI</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #06080d;
+      --panel: #0c1017;
+      --panel-2: #111720;
+      --line: rgba(148, 163, 184, 0.14);
+      --text: #e8f1ff;
+      --muted: #8899b2;
+      --blue: #4aa3ff;
+      --cyan: #22d3ee;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #fb7185;
+      --coral: #ff6b6b;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+      --radius: 18px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); }
+    .app { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0; }
+    .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; }
+    .brand-mark { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, var(--cyan), var(--blue)); display: grid; place-items: center; color: #00111d; font-weight: 900; }
+    .brand-name { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
+    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--muted); font-size: 12px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .dot.live { background: var(--green); box-shadow: 0 0 0 6px rgba(52,211,153,0.12), 0 0 18px rgba(52,211,153,0.35); }
+
+    .hero-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+    .metric-card { position: relative; padding: 18px; border-radius: 16px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(18,24,36,0.95), rgba(10,14,22,0.95)); box-shadow: var(--shadow); overflow: hidden; }
+    .metric-card::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 20% -20%, rgba(255,255,255,0.04), transparent 40%); pointer-events: none; }
+    .metric-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; }
+    .metric-value { margin-top: 8px; font-size: 38px; font-weight: 850; letter-spacing: -0.04em; line-height: 1; }
+    .metric-sub { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .metric-icon { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; }
+
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+    .panel { border-radius: 16px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(18,24,36,0.95), rgba(10,14,22,0.95)); box-shadow: var(--shadow); overflow: hidden; }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.02); }
+    .panel-title { margin: 0; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: #d7e5f8; }
+    .panel-body { padding: 14px 16px; }
+
+    .evidence { margin-bottom: 18px; }
+    .evidence-table { width: 100%; border-collapse: collapse; }
+    .evidence-table th, .evidence-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }
+    .evidence-table th { color: #b7c6db; background: rgba(255,255,255,0.02); text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; font-weight: 600; }
+    .evidence-table tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+    .badge.high { color: #bbf7d0; background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.28); }
+    .badge.medium { color: #fde68a; background: rgba(251,191,36,0.12); border: 1px solid rgba(251,191,36,0.28); }
+    .badge.danger { color: #fecdd3; background: rgba(251,113,133,0.12); border: 1px solid rgba(251,113,133,0.28); }
+    .btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; font-size: 13px; border: 0; }
+    .btn-secondary { border: 1px solid rgba(148,163,184,0.22); color: #c8d6e8; background: rgba(255,255,255,0.04); }
+    .btn-cta { width: 100%; border: 0; color: #00111d; background: linear-gradient(135deg, var(--coral), #ff8e53); box-shadow: 0 16px 40px rgba(255,107,107,0.22); padding: 14px; border-radius: 14px; font-size: 15px; }
+
+    .drop-zone { border: 1px dashed rgba(148,163,184,0.28); border-radius: 16px; padding: 28px; text-align: center; background: rgba(255,255,255,0.015); cursor: pointer; transition: all 0.2s ease; }
+    .drop-zone.dragover { border-color: var(--cyan); background: rgba(34,211,238,0.06); }
+
+    .processing { display: none; text-align: center; padding: 60px 20px; }
+    .processing.active { display: block; }
+    .processing .steps { color: var(--muted); font-size: 13px; margin-top: 10px; min-height: 18px; }
+    .progress-bar { height: 4px; background: rgba(255,255,255,0.06); border-radius: 999px; overflow: hidden; margin-top: 14px; }
+    .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--cyan), var(--blue)); transition: width 0.4s ease; }
+
+    .report { display: none; }
+    .report.active { display: block; }
+    .hidden { display: none !important; }
+
+    .side-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100%); background: #0b101a; border-left: 1px solid var(--line); transform: translateX(100%); transition: transform 0.25s ease; z-index: 60; overflow: auto; }
+    .side-panel.open { transform: translateX(0); }
+    .side-panel-header { position: sticky; top: 0; display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); background: rgba(11,16,26,0.96); backdrop-filter: blur(10px); z-index: 1; }
+    .side-panel-body { padding: 16px; }
+    .source-grid { display: grid; gap: 12px; }
+    .source-card { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: rgba(255,255,255,0.02); }
+    .source-header { padding: 10px 12px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+    .highlight { background: rgba(251,113,133,0.18); border-left: 3px solid var(--red); padding: 2px 4px; border-radius: 4px; }
+
+    @media (max-width: 980px) { .hero-metrics, .charts { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="hero-top">
+      <div class="brand">
+        <div class="brand-mark">X</div>
+        <div>
+          <div class="brand-name">xProcur<span style="color:var(--blue)">AI</span></div>
+          <div style="color:var(--muted); font-size:12px; margin-top:2px;">Shadow Audit Report</div>
+        </div>
+      </div>
+      <div class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Ready</span></div>
+    </div>
+
+    <section id="ingest">
+      <div class="panel">
+        <div class="panel-header"><h2 class="panel-title">Shadow Pilot — Data Ingestion</h2></div>
+        <div class="panel-body">
+          <p style="color:var(--muted); margin:0 0 12px; font-size:13px;">Drop your last 6 months of invoices, POs, and ERP exports. We analyze everything offline and deliver a financial consulting-grade report.</p>
+          <div class="drop-zone" id="dropZone">
+            <div style="font-size:28px; margin-bottom:8px;">📂</div>
+            <div style="font-weight:700;">Drag & drop files here</div>
+            <div style="color:var(--muted); font-size:12px; margin-top:6px;">or click to browse — PDF, PNG, JPG, CSV, XLSX, TXT</div>
+            <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.xls,.txt" style="display:none" />
+          </div>
+          <div id="fileList" style="margin-top:10px; color:var(--muted); font-size:12px;"></div>
+          <button class="btn btn-cta" id="runAuditBtn" style="margin-top:14px;" disabled>Run Shadow Audit</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="processing" class="processing">
+      <div style="font-size:22px; font-weight:800; letter-spacing:-0.02em;">Analyzing your procurement data...</div>
+      <div class="steps" id="processingSteps">Initializing...</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    </section>
+
+    <section id="report" class="report">
+      <div class="hero-metrics">
+        <div class="metric-card">
+          <div class="metric-label"><div class="metric-icon" style="background:rgba(251,191,36,0.12); color:var(--amber);">⏱</div>Time Leaked</div>
+          <div class="metric-value" style="color:var(--amber);" id="heroTime">0</div>
+          <div class="metric-sub" id="heroTimeSub">Hours wasted on manual 3-way matching and data entry.</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><div class="metric-icon" style="background:rgba(251,113,133,0.12); color:var(--red);">📉</div>Money Leaked</div>
+          <div class="metric-value" style="color:var(--red);" id="heroMoney">0</div>
+          <div class="metric-sub" id="heroMoneySub">Identified in overcharges, duplicates, and missed discounts.</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label"><div class="metric-icon" style="background:rgba(74,163,255,0.12); color:var(--blue);">🛡</div>Risk Exposure</div>
+          <div class="metric-value" style="color:var(--blue);" id="heroRisk">0%</div>
+          <div class="metric-sub" id="heroRiskSub">Of spend was maverick or from unvetted suppliers.</div>
+        </div>
+      </div>
+
+      <div class="charts">
+        <div class="panel">
+          <div class="panel-header"><h2 class="panel-title">Where Your Time Goes</h2><span class="pill" style="font-size:11px;">Donut</span></div>
+          <div class="panel-body"><canvas id="timeChart" height="220"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2 class="panel-title">Top 5 Suppliers by Financial Discrepancy</h2><span class="pill" style="font-size:11px;">Bar</span></div>
+          <div class="panel-body"><canvas id="supplierChart" height="220"></canvas></div>
+        </div>
+      </div>
+
+      <div class="panel evidence">
+        <div class="panel-header"><h2 class="panel-title">Anomaly Evidence Log</h2><span class="pill" style="font-size:11px;" id="evidenceCount">0 records</span></div>
+        <div class="panel-body" style="overflow:auto;">
+          <table class="evidence-table">
+            <thead><tr><th>Date</th><th>Supplier</th><th>Document Type</th><th>AI Finding</th><th>Financial Impact</th><th></th></tr></thead>
+            <tbody id="evidenceBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="position:sticky; bottom:16px; margin-top:18px;">
+        <button class="btn btn-cta" id="deployBtn">🚀 Deploy Live Mode — Recover lost value this year</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="side-panel" id="sidePanel">
+    <div class="side-panel-header">
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted);">Evidence Viewer</div>
+        <div style="font-weight:700; margin-top:2px;" id="sideTitle">Document comparison</div>
+      </div>
+      <button class="btn btn-secondary" id="closeSide">Close</button>
+    </div>
+    <div class="side-panel-body">
+      <div class="source-grid" id="sourceGrid"></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const files = [];
+    let charts = { time: null, supplier: null };
+    let latestAudit = null;
+
+    const dropZone = $('dropZone');
+    const fileInput = $('fileInput');
+    const runBtn = $('runAuditBtn');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+    fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+    function handleFiles(list) {
+      for (const f of list) files.push(f);
+      renderFiles();
+      runBtn.disabled = false;
+    }
+
+    function renderFiles() {
+      $('fileList').innerHTML = files.map(f => `<div>• ${escapeHtml(f.name)} (${(f.size/1024).toFixed(1)} KB)</div>`).join('');
+    }
+
+    runBtn.addEventListener('click', async () => {
+      $('ingest').classList.add('hidden');
+      $('processing').classList.add('active');
+      setStatus('Processing...', true);
+
+      const steps = [
+        'Reading invoices, POs and exports...',
+        'Cross-referencing PO terms with invoice line items...',
+        'Detecting pricing anomalies and duplicates...',
+        'Calculating manual processing hours...',
+        'Compiling executive report...',
+      ];
+      let i = 0;
+      const stepEl = $('processingSteps');
+      const progress = $('progressFill');
+      const tick = setInterval(() => {
+        if (i >= steps.length) { clearInterval(tick); return; }
+        stepEl.textContent = steps[i];
+        progress.style.width = `${Math.min(100, ((i + 1) / steps.length) * 100)}%`;
+        i += 1;
+      }, 700);
+
+      const form = new FormData();
+      files.forEach(f => form.append('files', f));
+      try {
+        const r = await fetch('/api/ai/shadow-audit', { method: 'POST', body: form });
+        const data = await r.json();
+        clearInterval(tick);
+        if (!data.success) throw new Error(data.error || 'Audit failed');
+        latestAudit = data;
+        setStatus('Report ready', false);
+        $('processing').classList.remove('active');
+        $('report').classList.add('active');
+        renderReport(data);
+      } catch (err) {
+        clearInterval(tick);
+        setStatus('Error', false);
+        stepEl.textContent = err.message;
+        stepEl.style.color = 'var(--red)';
+      }
+    });
+
+    function renderReport(data) {
+      const h = data.hero;
+      $('heroTime').textContent = h.time_leaked_hours.toLocaleString();
+      $('heroTimeSub').textContent = `Wasted on manual 3-way matching and data entry. Breakdown: ${Object.entries(h.time_leaked_breakdown).map(([k,v])=>`${k} ${v}h`).join(', ')}`;
+      const money = h.money_leaked || 0;
+      $('heroMoney').textContent = money.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+      $('heroMoneySub').textContent = `Identified in ${Object.keys(h.money_leaked_breakdown || {}).join(', ')}.`;
+      $('heroRisk').textContent = `${h.risk_exposure_pct}%`;
+      $('heroRiskSub').textContent = `Approx. ${(h.risk_exposure_amount || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} of spend was maverick or from unvetted suppliers.`;
+
+      renderTimeChart(data.charts.time_breakdown);
+      renderSupplierChart(data.charts.top_suppliers);
+      renderEvidence(data.evidence || []);
+    }
+
+    function renderTimeChart(items) {
+      const ctx = $('timeChart').getContext('2d');
+      if (charts.time) charts.time.destroy();
+      charts.time = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: items.map(i => i.label),
+          datasets: [{ data: items.map(i => i.value), backgroundColor: items.map(i => i.color), borderWidth: 0 }],
+        },
+        options: {
+          cutout: '62%',
+          plugins: { legend: { position: 'bottom', labels: { color: '#c8d6e8', padding: 14, font: { size: 12 } } } },
+        },
+      });
+    }
+
+    function renderSupplierChart(items) {
+      const ctx = $('supplierChart').getContext('2d');
+      if (charts.supplier) charts.supplier.destroy();
+      const labels = items.map(i => i.supplier);
+      const values = items.map(i => i.leaked);
+      charts.supplier = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{ label: 'Leaked ($)', data: values, backgroundColor: '#fb7185', borderRadius: 6, barPercentage: 0.55 }],
+        },
+        options: {
+          indexAxis: 'y',
+          scales: {
+            x: { ticks: { color: '#8899b2', callback: v => '$' + v.toLocaleString() }, grid: { color: 'rgba(148,163,184,0.08)' } },
+            y: { ticks: { color: '#e8f1ff', font: { size: 12 } }, grid: { display: false } },
+          },
+          plugins: { legend: { display: false } },
+        },
+      });
+    }
+
+    function renderEvidence(evidence) {
+      $('evidenceCount').textContent = `${evidence.length} records`;
+      $('evidenceBody').innerHTML = evidence.map(row => `
+        <tr>
+          <td>${escapeHtml(row.date)}</td>
+          <td>${escapeHtml(row.supplier)}</td>
+          <td><span class="badge ${badgeFor(row.doc_type)}">${escapeHtml(row.doc_type)}</span></td>
+          <td>${escapeHtml(row.finding)}</td>
+          <td style="color:var(--red); font-weight:700;">${row.financial_impact ? row.financial_impact.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : '—'}</td>
+          <td><button class="btn btn-secondary" style="padding:6px 10px; font-size:11px;" onclick="openSource('${row.id}')">View Source</button></td>
+        </tr>
+      `).join('');
+      window._evidenceMap = Object.fromEntries(evidence.map(e => [e.id, e]));
+    }
+
+    function badgeFor(type) {
+      if (type === 'invoice') return 'danger';
+      if (type === 'po') return 'high';
+      return 'medium';
+    }
+
+    window.openSource = function(id) {
+      const row = window._evidenceMap[id];
+      if (!row) return;
+      $('sideTitle').textContent = `${row.doc_type.toUpperCase()} — ${row.supplier}`;
+      $('sourceGrid').innerHTML = `
+        <div class="source-card">
+          <div class="source-header">Original Document</div>
+          <div style="padding:12px; color:var(--muted); font-size:12px;">File: ${escapeHtml(row.filename || 'uploaded_document.pdf')}</div>
+          <div style="padding:0 12px 12px; font-size:13px; line-height:1.6;">
+            <div>Date: <strong>${escapeHtml(row.date)}</strong></div>
+            <div>Supplier: <strong>${escapeHtml(row.supplier)}</strong></div>
+            <div style="margin-top:8px;">Finding: <span class="highlight">${escapeHtml(row.finding)}</span></div>
+            <div style="margin-top:8px;">Confidence: <strong>${row.confidence}</strong></div>
+          </div>
+        </div>
+        <div class="source-card">
+          <div class="source-header">AI Analysis</div>
+          <div style="padding:12px; font-size:13px; line-height:1.6;">
+            <div style="color:var(--red); font-weight:700; margin-bottom:6px;">Financial Impact: ${row.financial_impact ? row.financial_impact.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : '—'}</div>
+            <div style="color:var(--muted);">The AI cross-referenced this document against your PO terms and detected a ${row.finding.toLowerCase()}.</div>
+          </div>
+        </div>
+      `;
+      $('sidePanel').classList.add('open');
+    };
+
+    $('closeSide').addEventListener('click', () => $('sidePanel').classList.remove('open'));
+
+    $('deployBtn').addEventListener('click', () => {
+      alert('Thank you. Our team will contact you to activate Live Mode and begin recovering lost value immediately.');
+    });
+
+    function setStatus(text, live) { $('statusText').textContent = text; $('statusDot').classList.toggle('live', live); }
+    function escapeHtml(v) { return String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;'); }
+  </script>
+</body>
+</html>

@@ -21,6 +21,7 @@ from ai_engine.models import (
     ERPCreatePORequest,
     ERPSyncSupplierRequest,
     NegotiationRequest,
+    QuoteLineModel,
     QuoteModel,
     RFQModel,
     SupplierProfileModel,
@@ -34,7 +35,9 @@ from ai_engine.rag import (
     add_supplier_document,
     _rfq_collection,
     _supplier_collection,
+    answer_from_documents,
 )
+from ai_engine.shadow_audit import run_shadow_audit
 from crawler_service import run_crawl
 
 ROOT = Path(__file__).resolve().parent
@@ -69,6 +72,11 @@ async def log_requests(request, call_next):
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/shadow-audit")
+async def shadow_audit_page():
+    return FileResponse(STATIC_DIR / "shadow-audit.html")
 
 
 @app.get("/health")
@@ -213,6 +221,25 @@ async def analytics_dashboard():
     return engine.dashboard()
 
 
+@app.get("/api/ai/analytics/forecast")
+async def spend_forecast():
+    from ai_engine.analytics import get_spend_forecast
+    return get_spend_forecast(engine.db.path)
+
+
+@app.get("/api/ai/analytics/buyer-performance")
+async def buyer_performance():
+    from ai_engine.analytics import get_buyer_performance
+    return get_buyer_performance(engine.db.path)
+
+
+@app.post("/api/ai/analytics/market-benchmarks")
+async def market_benchmarks(payload: dict[str, Any]):
+    from ai_engine.analytics import get_market_benchmarks
+    query = payload.get("query", "")
+    return get_market_benchmarks(engine.db.path, query)
+
+
 @app.get("/api/ai/erp/providers")
 async def erp_providers():
     from ai_engine.erp import erp_provider_status
@@ -309,6 +336,22 @@ async def ocr_extract(file: UploadFile = File(...)):
         return {"text": "", "error": str(exc)}
 
 
+@app.post("/api/ai/shadow-audit")
+async def shadow_audit(files: list[UploadFile] = File(default=[])):
+    try:
+        uploads: list[tuple[str, bytes, str]] = []
+        for f in files:
+            content = await f.read()
+            uploads.append((f.filename or "upload", content, f.content_type or ""))
+        if not uploads:
+            return {"success": False, "error": "No files uploaded."}
+        result = run_shadow_audit(uploads)
+        return {"success": True, **result}
+    except Exception as exc:
+        logger.exception("shadow audit failed")
+        return {"success": False, "error": str(exc)}
+
+
 @app.post("/api/ai/rag/search")
 async def rag_search(payload: dict[str, Any]):
     query = payload.get("query") or ""
@@ -363,6 +406,38 @@ async def rag_stats():
     except Exception as exc:
         logger.exception("rag stats failed")
         return {"rfq_knowledge": 0, "supplier_knowledge": 0, "error": str(exc)}
+
+
+@app.post("/api/ai/offers/generate")
+async def generate_offer(payload: dict[str, Any]):
+    rfq = payload.get("rfq") or {}
+    suppliers = payload.get("suppliers") or []
+    return engine.generate_offer(rfq, suppliers)
+
+
+@app.post("/api/ai/offers/counter")
+async def counter_offer_endpoint(payload: dict[str, Any]):
+    rfq = payload.get("rfq") or {}
+    original_offer = payload.get("original_offer") or {}
+    supplier = payload.get("supplier") or {}
+    return engine.generate_counter_offer(rfq, original_offer, supplier)
+
+
+@app.post("/api/ai/chat/query")
+async def chat_query(payload: dict[str, Any]):
+    message = payload.get("message") or ""
+    doc_ids = payload.get("doc_ids")
+    context = answer_from_documents(message, doc_ids)
+    if context.get("context"):
+        system_prompt = f"""You are an AI Business Specialist answering questions about procurement documents.
+        Use the following context to answer the user's question.
+        Context: {context['context'][:2000]}
+        Be concise and professional.
+        """
+        from ai_engine.chatbot import chat_with_groq
+        response = chat_with_groq([{"role": "user", "content": message}], system_prompt)
+        return {"response": response or "Based on the documents, I found relevant information.", "sources": context.get("sources", [])}
+    return {"response": "No relevant documents found for your query.", "sources": []}
 
 
 @app.websocket("/ws/crawl")

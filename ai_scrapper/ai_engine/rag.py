@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
+from chromadb.errors import InvalidDimensionException
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -106,10 +107,19 @@ def init_rag_db():
 
 
 def add_rfq_document(text: str, metadata: dict, doc_id: str) -> bool:
-    global _rfq_collection
+    global _rfq_collection, _client, _embedding_fn
     try:
         if _rfq_collection is None:
             init_rag_db()
+        _rfq_collection.upsert(documents=[text], metadatas=[metadata], ids=[doc_id])
+        return True
+    except InvalidDimensionException:
+        _client.delete_collection("rfq_knowledge")
+        _rfq_collection = _client.get_or_create_collection(
+            name="rfq_knowledge",
+            embedding_function=_embedding_fn,
+            metadata={"hnsw:space": "cosine"},
+        )
         _rfq_collection.upsert(documents=[text], metadatas=[metadata], ids=[doc_id])
         return True
     except Exception:
@@ -117,10 +127,19 @@ def add_rfq_document(text: str, metadata: dict, doc_id: str) -> bool:
 
 
 def add_supplier_document(text: str, metadata: dict, doc_id: str) -> bool:
-    global _supplier_collection
+    global _supplier_collection, _client, _embedding_fn
     try:
         if _supplier_collection is None:
             init_rag_db()
+        _supplier_collection.upsert(documents=[text], metadatas=[metadata], ids=[doc_id])
+        return True
+    except InvalidDimensionException:
+        _client.delete_collection("supplier_knowledge")
+        _supplier_collection = _client.get_or_create_collection(
+            name="supplier_knowledge",
+            embedding_function=_embedding_fn,
+            metadata={"hnsw:space": "cosine"},
+        )
         _supplier_collection.upsert(documents=[text], metadatas=[metadata], ids=[doc_id])
         return True
     except Exception:
@@ -158,6 +177,62 @@ def get_all_rfqs() -> list[dict]:
         return _format_get_results(results)
     except Exception:
         return []
+
+
+def query_rag_knowledge(query: str, top_k: int = 5) -> list[dict]:
+    global _rfq_collection
+    try:
+        if _rfq_collection is None:
+            init_rag_db()
+        results = _rfq_collection.query(query_texts=[query], n_results=top_k)
+        return _format_query_results(results)
+    except Exception:
+        return []
+
+
+def query_supplier_knowledge(query: str, top_k: int = 5) -> list[dict]:
+    global _supplier_collection
+    try:
+        if _supplier_collection is None:
+            init_rag_db()
+        results = _supplier_collection.query(query_texts=[query], n_results=top_k)
+        return _format_query_results(results)
+    except Exception:
+        return []
+
+
+def answer_from_documents(query: str, doc_ids: list[str] | None = None) -> dict[str, Any]:
+    global _rfq_collection, _supplier_collection
+    try:
+        if _rfq_collection is None:
+            init_rag_db()
+        relevant_texts = []
+        sources = []
+        if doc_ids:
+            results = _rfq_collection.get(ids=doc_ids)
+            relevant_texts = results.get("documents", [])
+            sources = [d[:100] + "..." if len(d) > 100 else d for d in relevant_texts[:5]]
+        else:
+            rfq_results = _rfq_collection.query(query_texts=[query], n_results=5)
+            rfq_texts = rfq_results.get("documents", [[]])[0] if rfq_results.get("documents") else []
+            relevant_texts = rfq_texts[:5]
+            sources = [d[:100] + "..." if len(d) > 100 else d for d in relevant_texts]
+
+            if _supplier_collection is not None:
+                sup_results = _supplier_collection.query(query_texts=[query], n_results=5)
+                sup_texts = sup_results.get("documents", [[]])[0] if sup_results.get("documents") else []
+                for doc in sup_texts[:5]:
+                    if doc not in relevant_texts:
+                        relevant_texts.append(doc)
+                        sources.append(doc[:100] + "..." if len(doc) > 100 else doc)
+
+        context = "\n\n".join(relevant_texts) if relevant_texts else "No relevant documents found."
+        return {
+            "context": context,
+            "sources": sources,
+        }
+    except Exception as e:
+        return {"context": "", "sources": [], "error": str(e)}
 
 
 def clear_collection(collection_name: str) -> bool:

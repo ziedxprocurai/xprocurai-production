@@ -8,7 +8,7 @@ from typing import Any
 import requests
 
 from .ocr import extract_text_from_bytes
-from .rag import add_rfq_document, init_rag_db, search_similar_rfqs, search_similar_suppliers
+from .rag import add_rfq_document, init_rag_db, search_similar_rfqs, search_similar_suppliers, answer_from_documents
 from .schemas import RfqItem, RFQ, to_jsonable
 
 
@@ -43,10 +43,17 @@ def chat_with_groq(messages: list[dict[str, str]], system_prompt: str | None = N
 
 INTENT_KEYWORDS = {
     "check_stock": ["stock", "inventaire", "disponible", "available", "inventory", "fournisseurs disponibles", "liste fournisseurs"],
-    "compare_suppliers": ["compare", "comparing", "supplier", "fournisseur", "meilleure offre", "meilleur prix", "best offer", "best price"],
-    "analyze_risk": ["risque", "risk", "danger", "fraude", "fraud", "analyser risque"],
-    "analytics_spend": ["spend", "spent", "dépens", "budget", "cost", "montant", "total", "combien", "analytics", "dashboard", "dashbord", "graphique", "chart", "visualiser", "comparer", "comparison", "stats", "performances", "performance", "fournisseur", "supplier", "dernier", "année", "month", "mois", "monthly", "trend"],
+    "compare_suppliers": ["compare", "comparing", "supplier", "fournisseur", "meilleure offre", "meilleur prix", "best offer", "best price", "matching", "recherche fournisseur"],
+    "analyze_risk": ["risque", "risk", "danger", "fraude", "fraud", "analyser risque", "évaluation risque", "risk assessment"],
+    "analytics_spend": ["spend", "spent", "dépens", "budget", "cost", "montant", "total", "combien", "analytics", "dashboard", "dashbord", "graphique", "chart", "visualiser", "comparer", "comparison", "stats", "performances", "performance", "fournisseur", "supplier", "dernier", "année", "month", "mois", "monthly", "trend", "prévisions", "forecast", "predictions"],
     "ocr_process": ["upload", "ocr", "scan", "image", "pdf", "document", "fichier", "télécharger"],
+    "offer_generation": ["offre", "offer", "devis", "quote", "générer offre", "create offer", "generate quote", "prix", "price"],
+    "counter_offer": ["contre-offre", "counter offer", "rester", "accepter", "négocier", "negotiate", "discussion prix"],
+    "forecast": ["prévision", "forecast", "prediction", "tendance", "trend", "future spend", "spend future"],
+    "supplier_discovery": ["découvrir", "discover", "nouveaux fournisseurs", "new suppliers", "supplier hunt", "find suppliers"],
+    "supplier_lookup": ["email", "mail", "contact", "coordonnées", "adresse mail", "phone", "tel", "téléphone", "numero", "numéro", "fournisseur", "supplier", "comment contacter", "how to contact", "coordonnées du", "coordonnees du"],
+    "buyer_insights": ["buyer", "acheteur", "performance acheteur", "buyer performance", "analytics buyer"],
+    "market_intelligence": ["marché", "market", "intelligence", "benchmark", "prix moyen", "market price"],
 }
 
 
@@ -54,7 +61,9 @@ def detect_intent(text: str, has_file: bool = False) -> str:
     lowered = text.lower()
     if has_file or any(kw in lowered for kw in ["upload", "image", "pdf", "document", "scan", "télécharger", "fichier"]):
         return "ocr_process"
-    if any(kw in lowered for kw in ["besoin", "want", "commander", "rfq", "requisition", "je veux", "j'ai besoin", "i need"]) or any(word in lowered for word in ["chaise", "chair", "bureau", "desk", "laptop", "ordinateur", "fourniture", "papeterie"]):
+    if any(kw in lowered for kw in ["email", "mail", "contact", "coordonnées", "adresse mail", "phone", "tel", "téléphone", "numero", "numéro", "fournisseur", "supplier", "comment contacter", "how to contact", "coordonnées du", "coordonnees du"]):
+        return "supplier_lookup"
+    if any(kw in lowered for kw in ["besoin", "want", "commander", "rfq", "requisition", "je veux", "j'ai besoin", "i need", "demande", "demand"]) or any(word in lowered for word in ["chaise", "chair", "bureau", "desk", "laptop", "ordinateur", "fourniture", "papeterie"]):
         return "create_requisition"
     for intent, keywords in INTENT_KEYWORDS.items():
         if intent != "ocr_process" and any(kw in lowered for kw in keywords):
@@ -110,6 +119,48 @@ def format_action_cards(intent: str, result: Any = None, workflow_payload: dict[
             "title": "Spend Analytics",
             "description": "Procurement spend analysis and BI dashboard.",
             "action": "analytics",
+            "result": result,
+        },
+        "offer_generation": {
+            "title": "Generate Offer",
+            "description": "Create professional supplier offers/quote.",
+            "action": "generate_offer",
+            "result": result,
+        },
+        "counter_offer": {
+            "title": "Counter Offer",
+            "description": "Negotiate prices and terms with suppliers.",
+            "action": "counter_offer",
+            "result": result,
+        },
+        "forecast": {
+            "title": "Spend Forecast",
+            "description": "Predict future procurement trends and spend.",
+            "action": "forecast",
+            "result": result,
+        },
+        "supplier_discovery": {
+            "title": "Supplier Discovery",
+            "description": "Find new suppliers matching your needs.",
+            "action": "discover_suppliers",
+            "result": result,
+        },
+        "supplier_lookup": {
+            "title": "Supplier Lookup",
+            "description": "Find supplier contact details from documents and database.",
+            "action": "supplier_lookup",
+            "result": result,
+        },
+        "buyer_insights": {
+            "title": "Buyer Insights",
+            "description": "Analyze buyer performance and procurement efficiency.",
+            "action": "buyer_analytics",
+            "result": result,
+        },
+        "market_intelligence": {
+            "title": "Market Intelligence",
+            "description": "Get market benchmarks and price intelligence.",
+            "action": "market_intel",
             "result": result,
         },
     }
@@ -192,7 +243,7 @@ def process_with_rag(
     if image_base64:
         image_content, image_filename = _decode_base64_content(image_base64, ".png")
     elif pdf_base64:
-        pdf_content, pdf_filename = _decode_base64_content(pdf_b64, ".pdf")
+        pdf_content, pdf_filename = _decode_base64_content(pdf_base64, ".pdf")
 
     content = image_content or pdf_content
     actual_filename = image_filename if image_content else pdf_filename
@@ -259,7 +310,9 @@ def process_with_rag(
         doc_id=doc_id,
     )
 
-    similar_rag_docs = search_similar_rfqs(extracted_text[:500], top_k=5)
+    query_text = extracted_text[:500]
+    similar_rfqs = search_similar_rfqs(query_text, top_k=5)
+    similar_suppliers = search_similar_suppliers(query_text, top_k=5)
 
     response_parts = []
     if llm_analysis.get("items"):
@@ -276,21 +329,35 @@ def process_with_rag(
     if llm_analysis.get("location"):
         response_parts.append(f"Location: {llm_analysis.get('location')}.")
 
-    if similar_rag_docs:
-        response_parts.append(f"Found {len(similar_rag_docs)} related documents in knowledge base.")
+    if similar_rfqs:
+        response_parts.append(f"Found {len(similar_rfqs)} related documents in knowledge base.")
+
+    if similar_suppliers:
+        response_parts.append(f"Found {len(similar_suppliers)} matching suppliers.")
+
+    system_prompt = f"""You are an AI Business Specialist answering questions about procurement documents.
+Use the following context to answer the user's question.
+Context: {similar_suppliers if similar_suppliers else 'No supplier matches'} | {similar_rfqs if similar_rfqs else 'No RFQ matches'}
+Document summary: {llm_analysis.get('summary', '') or 'N/A'}
+Items found: {', '.join(item.get('name', '') for item in llm_analysis.get('items', [])) or 'None'}
+Be concise and professional.
+"""
+    llm_response = chat_with_groq([{"role": "user", "content": message or "Summarize this procurement document and suggest next steps."}], system_prompt)
 
     result = {
         "extracted_text": extracted_text,
         "llm_analysis": llm_analysis,
         "rfq": rfq,
-        "similar_documents": similar_rag_docs,
+        "similar_documents": similar_rfqs,
     }
 
     card = format_action_cards("rag_process", result, {"need_text": extracted_text, "top_k": 5})
     if rfq:
         card["workflow_payload"]["rfq_data"] = rfq
+    if llm_response:
+        card["llm_response"] = llm_response
 
-    return {"intent": "rag_process", "response": " ".join(response_parts), "action_card": card, "extracted_text": extracted_text, "llm_analysis": llm_analysis, "rfq": rfq, "rag_context": {"similar_documents": similar_rag_docs}}
+    return {"intent": "rag_process", "response": " ".join(response_parts), "action_card": card, "extracted_text": extracted_text, "llm_analysis": llm_analysis, "rfq": rfq, "rag_context": {"similar_documents": similar_rfqs, "similar_suppliers": similar_suppliers}}
 
 
 def _extract_text_with_vision(image_base64: str, message: str = "", filename: str = "upload") -> dict | None:
@@ -365,6 +432,51 @@ If no JSON is possible, just return the raw text."""
         return {"_error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
+def _extract_supplier_contacts_from_text(text: str, query: str) -> dict[str, Any] | None:
+    import re
+    query_words = [w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) > 2]
+
+    sections = re.split(r'\f|\n\s*\n', text)
+    best_contacts = None
+    best_score = -1
+
+    for section in sections:
+        lines = section.strip().splitlines()
+        supplier_name = None
+        email = None
+        phone = None
+        score = 0
+
+        for line in lines:
+            low = line.strip()
+            if not low:
+                continue
+            matched_words = sum(1 for word in query_words if word in low.lower())
+            if matched_words > 0:
+                score += matched_words
+                if re.search(r"(llc|inc|ltd|gmbh|sarl|sa|corp|company|procurement)", low, re.IGNORECASE):
+                    if not supplier_name:
+                        supplier_name = re.sub(r"\s{2,}", " ", low).strip()[:80]
+            if not email:
+                m = re.search(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", low, re.IGNORECASE)
+                if m:
+                    email = m.group(0)
+            if not phone:
+                m = re.search(r"(\+\d{1,3}[\s.-]?\d{3}[\s.-]?\d{3}[\s.-]?\d{4}|\+\d{1,3}[\s.-]?\d{2,3}[\s.-]?\d{2,3}[\s.-]?\d{2,3})", low)
+                if m:
+                    phone = m.group(0)
+
+        if (email or phone) and score > best_score:
+            best_score = score
+            best_contacts = {
+                "name": supplier_name or "Unknown",
+                "email": email or "no email",
+                "phone": phone or "no phone",
+            }
+
+    return best_contacts
+
+
 def process_chat_with_image(
     message: str,
     image_base64: str | None = None,
@@ -388,14 +500,120 @@ def process_chat_with_image(
     content = image_content or pdf_content
     actual_filename = image_filename if image_content else pdf_filename
 
+    extracted_text = ""
+    if content:
+        extracted_text = extract_text_from_bytes(content, actual_filename)
+
+    if extracted_text:
+        ocr_doc_id = f"ocr-raw-{abs(hash(extracted_text)) % 1000000}"
+        add_rfq_document(
+            text=extracted_text,
+            metadata={"doc_type": "ocr_raw", "filename": actual_filename, "extracted_by": "ocr"},
+            doc_id=ocr_doc_id,
+        )
+
+    msg_intent = detect_intent(message) if message else "ocr_process"
+    if msg_intent != "ocr_process" and message:
+        if msg_intent == "supplier_lookup":
+            query = message.lower()
+            doc_contacts = None
+            if extracted_text:
+                doc_contacts = _extract_supplier_contacts_from_text(extracted_text, query)
+            if doc_contacts:
+                response = f"Supplier: {doc_contacts['name']}. Email: {doc_contacts['email']}. Phone: {doc_contacts['phone']}."
+                card = format_action_cards(msg_intent, [{"name": doc_contacts["name"], "contacts": {"emails": [doc_contacts["email"]], "phones": [doc_contacts["phone"]]}}])
+                card["matched_suppliers"] = [{"name": doc_contacts["name"], "contacts": {"emails": [doc_contacts["email"]], "phones": [doc_contacts["phone"]]}}]
+                rag_context = {
+                    "similar_documents": search_similar_rfqs(message, top_k=5),
+                    "similar_suppliers": search_similar_suppliers(message, top_k=5),
+                }
+                return {
+                    "intent": msg_intent,
+                    "response": response,
+                    "action_card": card,
+                    "extracted_text": extracted_text,
+                    "rag_context": rag_context,
+                }
+
+            matched_suppliers = []
+            rag_rfqs = search_similar_rfqs(message, top_k=3)
+            for r in rag_rfqs:
+                if r.get("distance", 1.0) < 0.75:
+                    doc_text = r.get("document", "")
+                    contacts = _extract_supplier_contacts_from_text(doc_text, query)
+                    if contacts:
+                        matched_suppliers.append({
+                            "name": contacts["name"],
+                            "contacts": {"emails": [contacts["email"]], "phones": [contacts["phone"]]},
+                            "source": "rag_rfq",
+                            "score": 1.0 - (r.get("distance", 1.0)),
+                        })
+
+            if not matched_suppliers:
+                rag_suppliers = search_similar_suppliers(message, top_k=5)
+                for r in rag_suppliers:
+                    if r.get("distance", 1.0) < 0.65:
+                        meta = r.get("metadata") or {}
+                        matched_suppliers.append({
+                            "id": meta.get("supplier_id"),
+                            "name": meta.get("name"),
+                            "contacts": {"emails": [], "phones": []},
+                            "source": "rag_supplier",
+                            "score": 1.0 - (r.get("distance", 1.0)),
+                        })
+
+            if not matched_suppliers:
+                db_suppliers = ai_engine.list_suppliers()
+                for sup in db_suppliers:
+                    name = (sup.get("name") or "").lower()
+                    website = (sup.get("website") or "").lower()
+                    if query in name or website in query or any(word in name for word in query.split() if len(word) > 2):
+                        matched_suppliers.append(sup)
+
+            if matched_suppliers:
+                best = matched_suppliers[0]
+                contacts = best.get("contacts") or {}
+                emails = contacts.get("emails") or []
+                phones = contacts.get("phones") or []
+                email_str = ", ".join(emails) if emails else "no email"
+                phone_str = ", ".join(phones) if phones else "no phone"
+                source = best.get("source", "database")
+                response = f"Supplier: {best.get('name')}. Email: {email_str}. Phone: {phone_str}. (source: {source})"
+                if len(matched_suppliers) > 1:
+                    response += f" Also found {len(matched_suppliers) - 1} other match(es)."
+                card = format_action_cards(msg_intent, matched_suppliers[:5])
+                card["matched_suppliers"] = matched_suppliers[:5]
+                rag_context = {
+                    "similar_documents": search_similar_rfqs(message, top_k=5),
+                    "similar_suppliers": search_similar_suppliers(message, top_k=5),
+                }
+                return {
+                    "intent": msg_intent,
+                    "response": response,
+                    "action_card": card,
+                    "extracted_text": extracted_text,
+                    "rag_context": rag_context,
+                }
+            response = "I couldn't find that supplier in the document or knowledge base. Try 'supplier discovery' or provide the exact company name."
+            return {"intent": msg_intent, "response": response, "action_card": format_action_cards(msg_intent), "extracted_text": extracted_text}
+        chat_result = process_chat_message(message, ai_engine=ai_engine)
+        chat_result.setdefault("extracted_text", extracted_text)
+        if extracted_text:
+            chat_result.setdefault("rag_context", {}).update({
+                "extracted_document": extracted_text[:500],
+                "similar_documents": search_similar_rfqs(extracted_text[:500], top_k=5),
+                "similar_suppliers": search_similar_suppliers(extracted_text[:500], top_k=5),
+            })
+        return chat_result
+
     if not content:
         return {"intent": "ocr_process", "response": "No valid image or PDF content provided.", "action_card": format_action_cards("ocr_process")}
 
-    extracted_text = extract_text_from_bytes(content, actual_filename)
-    vision_fallback = False
-    vision_result = None
     if not extracted_text:
         return {"intent": "ocr_process", "response": "Could not extract text from the uploaded document.", "action_card": format_action_cards("ocr_process")}
+
+    vision_fallback = False
+    vision_result = None
     if extracted_text.startswith("[EMPTY_OCR]"):
         if image_base64:
             image_base64_clean = image_base64.split(",", 1)[1] if "," in image_base64 else image_base64
@@ -572,7 +790,8 @@ def _format_dashboard(data: dict[str, Any]) -> str:
 
 def process_chat_message(message: str, ai_engine: Any = None) -> dict[str, Any]:
     from .orchestrator import engine as default_engine
-    from .rag import search_similar_rfqs
+    from .rag import search_similar_rfqs, search_similar_suppliers
+    from .analytics import get_spend_forecast, get_buyer_performance, get_market_benchmarks
 
     ai_engine = ai_engine or default_engine
     intent = detect_intent(message)
@@ -582,24 +801,53 @@ def process_chat_message(message: str, ai_engine: Any = None) -> dict[str, Any]:
         "budget_context": "Available procurement budget tracking via cost center integration.",
     }
 
-    system_prompt = f"""You are an AI Copilot for a procurement platform.
-Respond conversationally in French/English mix based on user language.
-Context: {context['supplier_count']} suppliers in database.
-Be helpful, concise, and suggest relevant actions.
-"""
+    rag_rfqs = search_similar_rfqs(message, top_k=5)
+    rag_suppliers = search_similar_suppliers(message, top_k=5)
+
+    def _format_rag(results: list[dict]) -> str:
+        if not results:
+            return "None"
+        return "\n".join(
+            f"- {r.get('metadata', {}).get('name', r.get('metadata', {}).get('title', 'Unknown'))} (dist: {r.get('distance', 0):.4f})"
+            for r in results[:5]
+        )
+
+    rag_context_block = f"Similar RFQs:\n{_format_rag(rag_rfqs)}\n\nSimilar suppliers:\n{_format_rag(rag_suppliers)}"
+
+    system_prompt = f"""You are an elite Procurement Business Specialist AI Copilot with deep expertise in B2B supply chains, vendor management, and strategic sourcing.
+    You operate in both French and English seamlessly. Your expertise spans:
+    - Supplier qualification and risk assessment
+    - Buyer performance analytics and optimization
+    - Market price intelligence and benchmarking
+    - Contract negotiation and offer generation
+    - Spend forecasting and cost analysis
+    - RFQ creation and quote comparison
+    - Both buyer (demand side) and supplier (supply side) perspectives
+
+    Knowledge base context (use ONLY if relevant to the user's question):
+    {rag_context_block}
+
+    Provide concise, actionable insights with professional tone. Use procurement terminology.
+    When analyzing data, provide specific numbers, percentages, and recommendations.
+    """
 
     if intent == "create_requisition":
         rfq = ai_engine.extract_rfq(message, use_llm=False)
-        rag_context = search_similar_rfqs(rfq.get("raw_text") or rfq.get("title") or "", top_k=5)
+        rag_context = {
+            "similar_rfqs": search_similar_rfqs(rfq.get("raw_text") or rfq.get("title") or "", top_k=5),
+            "similar_suppliers": search_similar_suppliers(rfq.get("raw_text") or rfq.get("title") or "", top_k=5),
+        }
         card = format_action_cards(intent, rfq, {"need_text": message, "top_k": 5})
-        card["rag_context"] = {"similar_rfqs": rag_context}
+        card["rag_context"] = rag_context
         card["suggested_prompt"] = "Would you like me to find matching suppliers for this requisition?"
         items = rfq.get("items") or []
         first_item = items[0] if items else {}
         response = f"I've extracted your requisition: {rfq.get('title', 'Procurement')}. "
         response += f"Found {first_item.get('name', 'items')} with {first_item.get('quantity', 'N/A')} quantity. "
-        if rag_context:
-            response += f"Found {len(rag_context)} similar historical RFQs."
+        if rag_context.get("similar_rfqs"):
+            response += f"Found {len(rag_context['similar_rfqs'])} similar historical RFQs. "
+        if rag_context.get("similar_suppliers"):
+            response += f"Found {len(rag_context['similar_suppliers'])} matching suppliers."
         return {"intent": intent, "response": response, "action_card": card}
 
     if intent == "check_stock":
@@ -659,19 +907,157 @@ Be helpful, concise, and suggest relevant actions.
         card = format_action_cards(intent, {"note": "Please provide an image or PDF to process."})
         return {"intent": intent, "response": "Please upload an image or PDF document to extract RFQ information.", "action_card": card}
 
+    if intent == "forecast":
+        forecast = get_spend_forecast(ai_engine.db.path)
+        card = format_action_cards(intent, forecast)
+        card["forecast"] = forecast
+        response = f"Spend forecast: {forecast.get('predicted_next_month', 0):,.0f} TND expected next month. "
+        response += f"Trend: {forecast.get('trend_direction', 'stable')}. "
+        response += f"Confidence: {forecast.get('confidence_pct', 0)}%."
+        return {"intent": intent, "response": response, "action_card": card, "forecast_data": forecast}
+
+    if intent == "buyer_insights":
+        buyer_perf = get_buyer_performance(ai_engine.db.path)
+        card = format_action_cards(intent, buyer_perf)
+        card["buyer_analytics"] = buyer_perf
+        response = f"Buyer performance analysis: {buyer_perf.get('total_buyers', 0)} buyers tracked. "
+        if buyer_perf.get('top_performer'):
+            response += f"Top performer: {buyer_perf.get('top_performer', {}).get('name', 'n/a')}."
+        return {"intent": intent, "response": response, "action_card": card, "buyer_data": buyer_perf}
+
+    if intent == "market_intelligence":
+        benchmarks = get_market_benchmarks(ai_engine.db.path, message)
+        card = format_action_cards(intent, benchmarks)
+        card["market_intel"] = benchmarks
+        if benchmarks.get('items'):
+            response = f"Market benchmarks: {len(benchmarks.get('items', []))} items found. "
+            for item in benchmarks.get('items', [])[:3]:
+                response += f"{item.get('name')}: {item.get('benchmark_low', 0)}-{item.get('benchmark_high', 0)} TND/unit. "
+        else:
+            response = "No market benchmarks available for this item category."
+        return {"intent": intent, "response": response, "action_card": card, "market_data": benchmarks}
+
+    if intent == "offer_generation":
+        rfq = ai_engine.extract_rfq(message, use_llm=False)
+        card = format_action_cards(intent, rfq, {"need_text": message})
+        card["suggested_prompt"] = "Would you like me to generate a professional quote for this requirement?"
+        items = rfq.get("items") or []
+        response = f"Ready to generate offer for: {rfq.get('title', 'Procurement')}. "
+        if items:
+            response += f"Items: {', '.join(i.get('name', '') for i in items[:3])}."
+        return {"intent": intent, "response": response, "action_card": card}
+
+    if intent == "counter_offer":
+        rfq = ai_engine.extract_rfq(message, use_llm=False)
+        negotiation = ai_engine.analyze_negotiation(rfq)
+        card = format_action_cards(intent, negotiation)
+        card["negotiation"] = negotiation
+        response = f"Counter-offer analysis: {negotiation.get('overall_recommendation', 'negotiate')}. "
+        response += f"Potential savings: {negotiation.get('potential_savings', 0):,.0f} TND ({negotiation.get('savings_pct', 0)}%)."
+        return {"intent": intent, "response": response, "action_card": card, "negotiation_data": negotiation}
+
+    if intent == "supplier_discovery":
+        suppliers = ai_engine.list_suppliers()[:10]
+        card = format_action_cards(intent, suppliers)
+        response = f"Found {context['supplier_count']} suppliers in database. Showing top performers."
+        return {"intent": intent, "response": response, "action_card": card}
+
+    if intent == "supplier_lookup":
+        query = message.lower()
+        matched_suppliers = []
+
+        rag_rfqs = search_similar_rfqs(message, top_k=3)
+        for r in rag_rfqs:
+            if r.get("distance", 1.0) < 0.75:
+                doc_text = r.get("document", "")
+                contacts = _extract_supplier_contacts_from_text(doc_text, query)
+                if contacts:
+                    matched_suppliers.append({
+                        "name": contacts["name"],
+                        "contacts": {"emails": [contacts["email"]], "phones": [contacts["phone"]]},
+                        "source": "rag_rfq",
+                        "score": 1.0 - (r.get("distance", 1.0)),
+                    })
+
+        if not matched_suppliers:
+            rag_suppliers = search_similar_suppliers(message, top_k=5)
+            for r in rag_suppliers:
+                if r.get("distance", 1.0) < 0.65:
+                    meta = r.get("metadata") or {}
+                    matched_suppliers.append({
+                        "id": meta.get("supplier_id"),
+                        "name": meta.get("name"),
+                        "contacts": {"emails": [], "phones": []},
+                        "source": "rag_supplier",
+                        "score": 1.0 - (r.get("distance", 1.0)),
+                    })
+
+        if not matched_suppliers:
+            db_suppliers = ai_engine.list_suppliers()
+            for sup in db_suppliers:
+                name = (sup.get("name") or "").lower()
+                website = (sup.get("website") or "").lower()
+                if query in name or website in query or any(word in name for word in query.split() if len(word) > 2):
+                    matched_suppliers.append(sup)
+
+        if matched_suppliers:
+            best = matched_suppliers[0]
+            contacts = best.get("contacts") or {}
+            emails = contacts.get("emails") or []
+            phones = contacts.get("phones") or []
+            email_str = ", ".join(emails) if emails else "no email"
+            phone_str = ", ".join(phones) if phones else "no phone"
+            source = best.get("source", "database")
+            response = f"Supplier: {best.get('name')}. Email: {email_str}. Phone: {phone_str}. (source: {source})"
+            if len(matched_suppliers) > 1:
+                response += f" Also found {len(matched_suppliers) - 1} other match(es)."
+            card = format_action_cards(intent, matched_suppliers[:5])
+            card["matched_suppliers"] = matched_suppliers[:5]
+            return {"intent": intent, "response": response, "action_card": card}
+
+        rag_rfqs = search_similar_rfqs(message, top_k=5)
+        rag_suppliers = search_similar_suppliers(message, top_k=5)
+        context_parts = []
+        for r in rag_rfqs:
+            doc = r.get("document", "")
+            if doc and doc not in context_parts:
+                context_parts.append(doc)
+        for r in rag_suppliers:
+            doc = r.get("document", "")
+            if doc and doc not in context_parts:
+                context_parts.append(doc)
+        context = "\n\n".join(context_parts[:5])
+        if context:
+            system_prompt = f"""You are a procurement assistant. Answer the user's question using ONLY the following document excerpts from the knowledge base. If the answer is not in the excerpts, say you don't know.
+Documents:
+{context}"""
+            llm_response = chat_with_groq([{"role": "user", "content": message}], system_prompt)
+            if llm_response:
+                card = format_action_cards(intent, {"llm_answer": llm_response})
+                card["rag_context"] = {"similar_rfqs": rag_rfqs, "similar_suppliers": rag_suppliers}
+                return {"intent": intent, "response": llm_response, "action_card": card}
+
+        response = "I couldn't find that supplier in the knowledge base or database. Try 'supplier discovery' or provide the exact company name."
+        return {"intent": intent, "response": response, "action_card": format_action_cards(intent)}
+
     llm_response = chat_with_groq([{"role": "user", "content": message}], system_prompt)
     if llm_response:
         return {"intent": intent, "response": llm_response, "action_card": format_action_cards(intent)}
 
     if any(word in message.lower() for word in ["chair", "laptop", "fourniture", "papeterie", "besoin", "demande", "chaise", "bureau"]):
         rfq = ai_engine.extract_rfq(message, use_llm=False)
-        rag_context = search_similar_rfqs(rfq.get("raw_text") or rfq.get("title") or "", top_k=5)
+        rag_context = {
+            "similar_rfqs": search_similar_rfqs(rfq.get("raw_text") or rfq.get("title") or "", top_k=5),
+            "similar_suppliers": search_similar_suppliers(rfq.get("raw_text") or rfq.get("title") or "", top_k=5),
+        }
         card = format_action_cards("create_requisition", rfq, {"need_text": message, "top_k": 5})
-        card["rag_context"] = {"similar_rfqs": rag_context}
+        card["rag_context"] = rag_context
         items = rfq.get("items") or []
         first_item = items[0] if items else {}
         response = f"I detected a procurement request: {rfq.get('title', 'Procurement')}. "
         response += f"Found {first_item.get('name', 'items')} with {first_item.get('quantity', 'N/A')} quantity."
+        if rag_context.get("similar_suppliers"):
+            response += f" Also found {len(rag_context['similar_suppliers'])} matching suppliers."
         return {"intent": "create_requisition", "response": response, "action_card": card}
 
-    return {"intent": intent, "response": "I can help with procurement. Try: 'How much did we spend last year?', 'Best performing suppliers', 'Create requisition for 500 chairs'.", "action_card": format_action_cards(intent)}
+    return {"intent": intent, "response": "I can help with procurement. Try: 'Forecast next quarter spend?', 'Buyer performance report?', 'Generate offer for 500 laptops?', 'What's the market price for office chairs?'.", "action_card": format_action_cards(intent)}

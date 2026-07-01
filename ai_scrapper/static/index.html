@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI Procurement Platform</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <style>
     ::view-transition-group(*),
     ::view-transition-old(*),
@@ -122,6 +123,14 @@
 
     @media (max-width: 1100px) { .hero, .layout, .main-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 560px) { .app { width: min(100% - 24px, 1480px); padding: 20px 0; } .metrics, .grid-2 { grid-template-columns: 1fr; } .event { grid-template-columns: 1fr; } }
+    .drop-zone { border: 1px dashed rgba(148,163,184,0.28); border-radius: 14px; padding: 22px; text-align: center; background: rgba(255,255,255,0.015); cursor: pointer; transition: all 0.2s ease; }
+    .drop-zone.dragover { border-color: var(--cyan); background: rgba(34,211,238,0.06); }
+    .progress-bar { height: 4px; background: rgba(255,255,255,0.06); border-radius: 999px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--cyan), var(--blue)); transition: width 0.4s ease; }
+    .highlight { background: rgba(251,113,133,0.18); border-left: 3px solid var(--red); padding: 2px 4px; border-radius: 4px; }
+    .side-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100%); background: #0b101a; border-left: 1px solid var(--line); transform: translateX(100%); transition: transform 0.25s ease; z-index: 60; overflow: auto; }
+    .side-panel.show { transform: translateX(0); }
+    .source-card { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: rgba(255,255,255,0.02); margin-bottom: 10px; }
   </style>
 </head>
 <body>
@@ -141,6 +150,7 @@
       <button class="tab" data-tab="quotes">Quotes & Risk</button>
       <button class="tab" data-tab="negotiate">Negotiate</button>
       <button class="tab" data-tab="chat">AI Copilot</button>
+      <button class="tab" data-tab="shadow">Shadow Audit</button>
     </section>
 
     <section id="workflow" class="tab-panel active">
@@ -327,6 +337,67 @@ Total HT: 12000 TND</textarea></div>
       </div>
     </section>
 
+    <section id="shadow" class="tab-panel">
+      <div class="panel" style="margin-bottom:14px;">
+        <div class="panel-header"><h2 class="panel-title">Shadow Pilot — Data Ingestion</h2></div>
+        <div class="panel-body">
+          <p style="color:var(--muted); margin:0 0 10px; font-size:13px;">Drop your last 6 months of invoices, POs, and ERP exports. We analyze everything offline and deliver a financial consulting-grade report.</p>
+          <div class="drop-zone" id="dropZone">
+            <div style="font-size:24px; margin-bottom:6px;">📂</div>
+            <div style="font-weight:700;">Drag & drop files here</div>
+            <div style="color:var(--muted); font-size:12px; margin-top:4px;">or click to browse — PDF, PNG, JPG, CSV, XLSX, TXT</div>
+            <input type="file" id="shadowFileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.xls,.txt" style="display:none" />
+          </div>
+          <div id="shadowFileList" style="margin-top:8px; color:var(--muted); font-size:12px;"></div>
+          <button class="primary" id="runShadowBtn" style="margin-top:10px;" disabled>Run Shadow Audit</button>
+        </div>
+      </div>
+
+      <div id="shadowProcessing" style="display:none; text-align:center; padding:40px 20px;">
+        <div style="font-size:20px; font-weight:800;">Analyzing your procurement data...</div>
+        <div style="color:var(--muted); font-size:13px; margin-top:8px; min-height:18px;" id="shadowSteps">Initializing...</div>
+        <div class="progress-bar" style="margin-top:12px;"><div class="progress-fill" id="shadowProgress" style="width:0%;"></div></div>
+      </div>
+
+      <div id="shadowReport" style="display:none;">
+        <div class="metrics" style="margin-bottom:14px;">
+          <div class="metric"><div class="metric-value" style="color:var(--amber);" id="sHeroTime">0</div><div class="metric-label">Time Leaked (hrs)</div></div>
+          <div class="metric"><div class="metric-value" style="color:var(--red);" id="sHeroMoney">0</div><div class="metric-label">Money Leaked</div></div>
+          <div class="metric"><div class="metric-value" style="color:var(--blue);" id="sHeroRisk">0%</div><div class="metric-label">Risk Exposure</div></div>
+        </div>
+        <div class="layout" style="margin-bottom:14px;">
+          <article class="panel"><div class="panel-header"><h2 class="panel-title">Where Your Time Goes</h2></div><div class="panel-body"><canvas id="timeChart" height="200"></canvas></div></article>
+          <article class="panel"><div class="panel-header"><h2 class="panel-title">Top 5 Suppliers by Discrepancy</h2></div><div class="panel-body"><canvas id="supplierChart" height="200"></canvas></div></article>
+        </div>
+        <article class="panel">
+          <div class="panel-header"><h2 class="panel-title">Anomaly Evidence Log</h2><span class="muted" id="evidenceCount">0 records</span></div>
+          <div class="panel-body" style="overflow:auto;">
+            <table class="offer-table">
+              <thead><tr><th>Date</th><th>Supplier</th><th>Document Type</th><th>AI Finding</th><th>Financial Impact</th><th></th></tr></thead>
+              <tbody id="evidenceBody"></tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel" style="margin-bottom:14px;">
+          <div class="panel-header"><h2 class="panel-title">Extracted Documents</h2><span class="muted" id="docCount">0 docs</span></div>
+          <div class="panel-body" id="docList" style="display:grid; gap:10px;"></div>
+        </article>
+        <div style="position:sticky; bottom:16px; margin-top:14px;">
+          <button class="primary" id="deployShadowBtn" style="width:100%;">🚀 Deploy Live Mode — Recover lost value this year</button>
+        </div>
+      </div>
+
+      <div class="side-panel" id="sidePanel">
+        <div class="modal">
+          <div class="modal-header">
+            <div><div class="panel-title" id="sideTitle">Evidence Viewer</div></div>
+            <button class="modal-close" id="closeSide">Close</button>
+          </div>
+          <div class="modal-body" id="sideBody"></div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <div class="modal-backdrop" id="supplierModal">
@@ -345,7 +416,16 @@ Total HT: 12000 TND</textarea></div>
   <script>
     const $ = (id) => document.getElementById(id);
     const state = { socket: null, latestCrawl: null, latestWorkflow: null, eventCount: 0 };
-    const api = (path, payload) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}) }).then((r) => r.json());
+    const api = async (path, payload) => {
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}) });
+      const text = await r.text();
+      if (!r.ok) {
+        let detail = text;
+        try { detail = JSON.parse(text).error || text; } catch {}
+        throw new Error(detail || r.statusText);
+      }
+      return JSON.parse(text);
+    };
 
     function fileToBase64(file) {
       return new Promise((resolve, reject) => {
@@ -1255,6 +1335,182 @@ $('addSuppliersFromCrawlBtn').addEventListener('click', async () => {
     }
 
     setStatus('Ready');
+
+    (function() {
+      const dropZone = $('dropZone');
+      const fileInput = $('shadowFileInput');
+      const runBtn = $('runShadowBtn');
+      const files = [];
+      let charts = { time: null, supplier: null };
+      let latestAudit = null;
+
+      dropZone.addEventListener('click', () => fileInput.click());
+      dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+      dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+      fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+      function handleFiles(list) {
+        for (const f of list) files.push(f);
+        $('shadowFileList').innerHTML = files.map(f => `<div>• ${escapeHtml(f.name)} (${(f.size/1024).toFixed(1)} KB)</div>`).join('');
+        runBtn.disabled = false;
+      }
+
+      runBtn.addEventListener('click', async () => {
+        $('shadowProcessing').style.display = 'block';
+        $('shadowReport').style.display = 'none';
+
+        const steps = [
+          'Reading invoices, POs and exports...',
+          'Cross-referencing PO terms with invoice line items...',
+          'Detecting pricing anomalies and duplicates...',
+          'Calculating manual processing hours...',
+          'Compiling executive report...',
+        ];
+        let i = 0;
+        const stepEl = $('shadowSteps');
+        const progress = $('shadowProgress');
+        const tick = setInterval(() => {
+          if (i >= steps.length) { clearInterval(tick); return; }
+          stepEl.textContent = steps[i];
+          progress.style.width = `${Math.min(100, ((i + 1) / steps.length) * 100)}%`;
+          i += 1;
+        }, 700);
+
+        const form = new FormData();
+        files.forEach(f => form.append('files', f));
+        try {
+          const r = await fetch('/api/ai/shadow-audit', { method: 'POST', body: form });
+          const data = await r.json();
+          clearInterval(tick);
+          if (!data.success) throw new Error(data.error || 'Audit failed');
+          latestAudit = data;
+          $('shadowProcessing').style.display = 'none';
+          $('shadowReport').style.display = 'block';
+          renderShadowReport(data);
+        } catch (err) {
+          clearInterval(tick);
+          stepEl.textContent = err.message;
+          stepEl.style.color = 'var(--red)';
+        }
+      });
+
+      function renderShadowReport(data) {
+        const h = data.hero;
+        $('sHeroTime').textContent = h.time_leaked_hours.toLocaleString();
+        $('sHeroMoney').textContent = (h.money_leaked || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+        $('sHeroRisk').textContent = `${h.risk_exposure_pct}%`;
+
+        if (data.meta && data.meta.errors && data.meta.errors.length) {
+          const errEl = document.createElement('div');
+          errEl.style.cssText = 'margin-bottom:12px; padding:10px; border-radius:10px; background:rgba(251,113,133,0.08); border:1px solid rgba(251,113,133,0.25); color:#fecdd3; font-size:12px;';
+          errEl.innerHTML = '<strong>Extraction notes:</strong><ul style="margin:4px 0 0 16px; padding:0;">' + data.meta.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('') + '</ul>';
+          const metrics = document.querySelector('.metrics');
+          if (metrics && metrics.parentNode) metrics.parentNode.insertBefore(errEl, metrics);
+        }
+
+        renderTimeChart(data.charts.time_breakdown);
+        renderSupplierChart(data.charts.top_suppliers);
+        renderEvidence(data.evidence || []);
+        renderDocuments(data.documents || []);
+      }
+
+      function renderDocuments(docs) {
+        $('docCount').textContent = `${docs.length} docs`;
+        $('docList').innerHTML = docs.map((d, idx) => `
+          <div style="border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:rgba(255,255,255,0.02);">
+            <div style="display:flex; justify-content:space-between; gap:10px; font-size:13px;">
+              <strong>${escapeHtml(d.filename)}</strong>
+              <span class="badge ${d.doc_type === 'invoice' ? 'danger' : (d.doc_type === 'po' ? 'high' : 'medium')}">${escapeHtml(d.doc_type)}</span>
+            </div>
+            <div style="color:var(--muted); font-size:12px; margin-top:4px;">
+              Supplier: <strong>${escapeHtml(d.supplier)}</strong> | Amounts: ${d.amounts.map(a => '$' + a.toLocaleString()).join(', ') || 'none'} | Pages: ${d.page_count}
+            </div>
+            ${d.text_preview ? `<details style="margin-top:6px;"><summary style="color:var(--muted); font-size:11px; cursor:pointer;">Raw OCR preview</summary><pre style="background:rgba(0,0,0,0.25); padding:8px; border-radius:8px; font-size:11px; overflow:auto; max-height:140px; margin-top:4px;">${escapeHtml(d.text_preview)}</pre></details>` : ''}
+          </div>
+        `).join('');
+      }
+
+      function renderTimeChart(items) {
+        const ctx = $('timeChart').getContext('2d');
+        if (charts.time) charts.time.destroy();
+        charts.time = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: items.map(i => i.label),
+            datasets: [{ data: items.map(i => i.value), backgroundColor: items.map(i => i.color), borderWidth: 0 }],
+          },
+          options: {
+            cutout: '62%',
+            plugins: { legend: { position: 'bottom', labels: { color: '#c8d6e8', padding: 10, font: { size: 11 } } } },
+          },
+        });
+      }
+
+      function renderSupplierChart(items) {
+        const ctx = $('supplierChart').getContext('2d');
+        if (charts.supplier) charts.supplier.destroy();
+        charts.supplier = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: items.map(i => i.supplier),
+            datasets: [{ label: 'Leaked ($)', data: items.map(i => i.leaked), backgroundColor: '#fb7185', borderRadius: 4, barPercentage: 0.5 }],
+          },
+          options: {
+            indexAxis: 'y',
+            scales: {
+              x: { ticks: { color: '#8899b2', callback: v => '$' + v.toLocaleString() }, grid: { color: 'rgba(148,163,184,0.08)' } },
+              y: { ticks: { color: '#e8f1ff', font: { size: 11 } }, grid: { display: false } },
+            },
+            plugins: { legend: { display: false } },
+          },
+        });
+      }
+
+      function renderEvidence(evidence) {
+        $('evidenceCount').textContent = `${evidence.length} records`;
+        $('evidenceBody').innerHTML = evidence.map(row => `
+          <tr>
+            <td>${escapeHtml(row.date)}</td>
+            <td>${escapeHtml(row.supplier)}</td>
+            <td><span class="badge ${row.doc_type === 'invoice' ? 'danger' : (row.doc_type === 'po' ? 'high' : 'medium')}">${escapeHtml(row.doc_type)}</span></td>
+            <td>${escapeHtml(row.finding)}</td>
+            <td style="color:var(--red); font-weight:700;">${row.financial_impact ? row.financial_impact.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : '—'}</td>
+            <td><button class="secondary" style="font-size:11px; padding:4px 8px;" onclick="openShadowSource('${row.id}')">View Source</button></td>
+          </tr>
+        `).join('');
+        window._shadowEvidence = Object.fromEntries(evidence.map(e => [e.id, e]));
+      }
+
+      window.openShadowSource = function(id) {
+        const row = window._shadowEvidence[id];
+        if (!row) return;
+        $('sideTitle').textContent = `${row.doc_type.toUpperCase()} — ${row.supplier}`;
+        $('sideBody').innerHTML = `
+          <div class="source-card" style="border:1px solid var(--line); border-radius:14px; overflow:hidden; background:rgba(255,255,255,0.02); margin-bottom:10px;">
+            <div style="padding:10px 12px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--line); font-size:12px; color:var(--muted);">Original Document</div>
+            <div style="padding:12px; font-size:13px; line-height:1.6;">
+              <div>File: <strong>${escapeHtml(row.filename || 'uploaded_document.pdf')}</strong></div>
+              <div>Date: <strong>${escapeHtml(row.date)}</strong></div>
+              <div>Supplier: <strong>${escapeHtml(row.supplier)}</strong></div>
+              <div style="margin-top:8px;">Finding: <span class="highlight">${escapeHtml(row.finding)}</span></div>
+              <div style="margin-top:8px;">Confidence: <strong>${row.confidence}</strong></div>
+            </div>
+          </div>
+          <div class="source-card" style="border:1px solid var(--line); border-radius:14px; overflow:hidden; background:rgba(255,255,255,0.02);">
+            <div style="padding:10px 12px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--line); font-size:12px; color:var(--muted);">AI Analysis</div>
+            <div style="padding:12px; font-size:13px; line-height:1.6;">
+              <div style="color:var(--red); font-weight:700; margin-bottom:6px;">Financial Impact: ${row.financial_impact ? row.financial_impact.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : '—'}</div>
+              <div style="color:var(--muted);">The AI cross-referenced this document against your PO terms and detected a ${row.finding.toLowerCase()}.</div>
+            </div>
+          </div>
+        `;
+        $('sidePanel').classList.add('show');
+      };
+
+      $('closeSide') && $('closeSide').addEventListener('click', () => $('sidePanel').classList.remove('show'));
+      $('deployShadowBtn') && $('deployShadowBtn').addEventListener('click', () => alert('Thank you. Our team will contact you to activate Live Mode.'));
+    })();
   </script>
 </body>
 </html>

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 from typing import Any
 
-from .analytics import execute_analytics_query, get_dashboard_metrics
+from .analytics import execute_analytics_query, get_dashboard_metrics, get_spend_forecast, get_buyer_performance, get_market_benchmarks
 from .erp import create_purchase_order, erp_provider_status, sync_inventory_update, sync_supplier_to_erp
 from .negotiation import analyze_negotiation
 from .ocr import extract_text_from_bytes as _extract_text_from_bytes
 from .quotes import compare_quotes, parse_quotes
-from .rag import add_rfq_document, init_rag_db
+from .rag import add_rfq_document, add_supplier_document, init_rag_db
 from .reporting import generate_report
 from .rfq import RfqItem, RFQ, extract_rfq, extract_rfq_with_llm
 from .risk import assess_risk
@@ -33,6 +34,25 @@ class ProcurementAIEngine:
     def _load_suppliers_from_database(self) -> None:
         for profile in self.db.list_suppliers():
             self.store.upsert(profile)
+        self._index_suppliers_to_rag()
+
+    def _index_suppliers_to_rag(self) -> None:
+        for profile in self.store.suppliers.values():
+            doc_id = f"supplier-{profile.id}"
+            add_supplier_document(
+                text=profile.description or profile.name or "",
+                metadata={
+                    "supplier_id": profile.id,
+                    "name": profile.name,
+                    "categories": json.dumps(profile.categories),
+                    "capabilities": json.dumps(profile.capabilities),
+                    "certifications": json.dumps(profile.certifications),
+                    "city": profile.city or "",
+                    "country": profile.country or "",
+                    "website": profile.website or "",
+                },
+                doc_id=doc_id,
+            )
 
     def extract_rfq(self, text: str, use_llm: bool = False) -> dict[str, Any]:
         rfq = extract_rfq(text, use_llm=use_llm)
@@ -208,8 +228,26 @@ class ProcurementAIEngine:
     def dashboard(self) -> dict[str, Any]:
         return get_dashboard_metrics(self.db.path)
 
+    def get_forecast(self, periods: int = 3) -> dict[str, Any]:
+        return get_spend_forecast(self.db.path, periods)
+
+    def get_buyer_performance(self) -> dict[str, Any]:
+        return get_buyer_performance(self.db.path)
+
+    def get_market_benchmarks(self, query: str = "") -> dict[str, Any]:
+        return get_market_benchmarks(self.db.path, query)
+
     def analyze_negotiation(self, rfq_payload: dict[str, Any], supplier_matches: list[dict[str, Any]] | None = None, quote_comparisons: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         return analyze_negotiation(rfq_payload, supplier_matches, quote_comparisons)
+
+    def generate_offer(self, rfq_payload: dict[str, Any], suppliers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        from .offers import generate_professional_offer
+        rfq = self._rfq_from_payload(rfq_payload)
+        return generate_professional_offer(rfq_payload, suppliers or [], self.db.path)
+
+    def generate_counter_offer(self, rfq_payload: dict[str, Any], original_offer: dict[str, Any], supplier: dict[str, Any]) -> dict[str, Any]:
+        from .offers import generate_counter_offer
+        return generate_counter_offer(rfq_payload, original_offer, supplier)
 
     def _rfq_from_payload(self, payload: dict[str, Any]) -> RFQ:
         items_data = payload.get("items") or []

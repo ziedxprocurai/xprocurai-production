@@ -49,23 +49,71 @@ def _extract_text_with_tesseract(image) -> str:
 
 
 def _extract_text_from_pdf_native(pdf_path: str) -> str:
+    errors = []
+    # Try PyMuPDF (fitz)
     try:
         import fitz
     except ImportError:
-        return ""
-    if not os.path.isfile(pdf_path):
-        return ""
+        errors.append("fitz not installed")
+    else:
+        if not os.path.isfile(pdf_path):
+            return ""
+        try:
+            document = fitz.open(pdf_path)
+            text_parts = []
+            for page in document:
+                page_text = page.get_text()
+                if page_text and page_text.strip():
+                    text_parts.append(page_text.strip())
+            document.close()
+            if text_parts:
+                return "\f".join(text_parts)
+        except Exception as exc:
+            errors.append(f"fitz error: {exc}")
+
+    # Try pypdf
     try:
-        document = fitz.open(pdf_path)
-        text_parts = []
-        for page in document:
-            page_text = page.get_text()
-            if page_text and page_text.strip():
-                text_parts.append(page_text.strip())
-        document.close()
-        return "\n".join(text_parts)
-    except Exception:
-        return ""
+        from pypdf import PdfReader
+    except ImportError:
+        errors.append("pypdf not installed")
+    else:
+        try:
+            reader = PdfReader(pdf_path)
+            text_parts = []
+            for page in reader.pages:
+                try:
+                    page_text = page.extract_text()
+                except Exception:
+                    page_text = ""
+                if page_text and page_text.strip():
+                    text_parts.append(page_text.strip())
+            if text_parts:
+                return "\f".join(text_parts)
+        except Exception as exc:
+            errors.append(f"pypdf error: {exc}")
+
+    # Try PyPDF2
+    try:
+        from PyPDF2 import PdfReader
+    except ImportError:
+        pass
+    else:
+        try:
+            reader = PdfReader(pdf_path)
+            text_parts = []
+            for page in reader.pages:
+                try:
+                    page_text = page.extract_text()
+                except Exception:
+                    page_text = ""
+                if page_text and page_text.strip():
+                    text_parts.append(page_text.strip())
+            if text_parts:
+                return "\f".join(text_parts)
+        except Exception as exc:
+            errors.append(f"PyPDF2 error: {exc}")
+
+    return ""
 
 
 def _extract_text_from_pdf_ocr(pdf_path: str) -> str:
@@ -143,7 +191,7 @@ def extract_text_from_bytes(content: bytes, filename: str = "upload") -> str:
     if ext in SUPPORTED_IMAGE_EXTENSIONS:
         image = _open_image(io.BytesIO(content))
         if image is None:
-            return ""
+            return "[EMPTY_OCR]"
         try:
             text = _extract_text_with_tesseract(image)
             if not text:
