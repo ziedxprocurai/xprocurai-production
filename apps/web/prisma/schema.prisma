@@ -21,6 +21,7 @@ model User {
   onboarded    Boolean      @default(false)
   companyId    String?      @map("company_id")
   company      Company?     @relation(fields: [companyId], references: [id])
+  scraperJobs  ScraperJob[]
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
 
@@ -235,4 +236,60 @@ enum RecordImportStatus {
   PENDING
   IMPORTED
   SKIPPED
+}
+
+model ScraperJob {
+  id             String            @id @default(cuid())
+  targetUrl      String            @map("target_url")
+  companyName    String?           @map("company_name")
+  status         ScraperJobStatus  @default(RUNNING)
+  maxPages       Int               @default(5) @map("max_pages")
+  verifyContacts Boolean           @default(true) @map("verify_contacts")
+  smtpVerify     Boolean           @default(false) @map("smtp_verify")
+  pagesCrawled   Int               @default(0) @map("pages_crawled")
+  pagesFailed    Int               @default(0) @map("pages_failed")
+  emailsFound    Int               @default(0) @map("emails_found")
+  phonesFound    Int               @default(0) @map("phones_found")
+  errorMessage   String?           @map("error_message")
+  createdById    String            @map("created_by_id")
+  createdBy      User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  contacts       ScrapedContact[]
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  @@map("scraper_jobs")
+}
+
+model ScrapedContact {
+  id             String              @id @default(cuid())
+  jobId          String              @map("job_id")
+  job            ScraperJob          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  type           ScrapedContactType
+  value          String
+  pageUrl        String              @map("page_url")
+  credibility    String              @default("rejected")
+  score          Int                 @default(0)
+  deliverability String?
+  details        Json?
+  reviewStatus   ContactReviewStatus @default(PENDING) @map("review_status")
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  @@map("scraped_contacts")
+}
+
+enum ScraperJobStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ScrapedContactType {
+  EMAIL
+  PHONE
+}
+
+enum ContactReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
