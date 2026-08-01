@@ -4,9 +4,62 @@ import { Navbar, Footer } from '@/components/landing';
 import { useLanguage } from '@/lib/i18n/language-context';
 import { Code2, Briefcase, Mail, Linkedin, Users } from 'lucide-react';
 
-const AVATAR_SEEDS = ['Zied-xProcurAI', 'Aziz-xProcurAI', 'Ayoub-xProcurAI', 'Ghazi-xProcurAI'];
 const ROLE_ICONS = [Code2, Code2, Briefcase, Briefcase];
 const EMAILS = ['zied@xprocur.ai', 'aziz@xprocur.ai', 'ayoub@xprocur.ai', 'ghazi@xprocur.ai'];
+
+// Per-founder avatar styling: Zied & Aziz are the tech co-founders (casual/hoodie look),
+// Ayoub & Ghazi are the business co-founders (blazer/business-casual look). All male.
+const AVATAR_CONFIGS: Record<string, string>[] = [
+  {
+    // Zied — tech co-founder: hoodie, glasses, beard
+    seed: 'Zied-xProcurAI',
+    top: 'shortFlat',
+    facialHair: 'beardLight',
+    facialHairProbability: '100',
+    clothing: 'hoodie',
+    clothesColor: '5199e4',
+    accessories: 'prescription02',
+    accessoriesProbability: '100',
+    skinColor: 'edb98a',
+  },
+  {
+    // Aziz — tech co-founder: hoodie, short beard
+    seed: 'Aziz-xProcurAI',
+    top: 'theCaesar',
+    facialHair: 'beardMedium',
+    facialHairProbability: '100',
+    clothing: 'hoodie',
+    clothesColor: '929598',
+    accessoriesProbability: '0',
+    skinColor: 'd08b5b',
+  },
+  {
+    // Ayoub — business co-founder: blazer & shirt, clean-shaven
+    seed: 'Ayoub-xProcurAI',
+    top: 'shortWaved',
+    clothing: 'blazerAndShirt',
+    clothesColor: '262e33',
+    accessoriesProbability: '0',
+    facialHairProbability: '0',
+    skinColor: 'ae5d29',
+  },
+  {
+    // Ghazi — business co-founder: blazer & sweater, light beard
+    seed: 'Ghazi-xProcurAI',
+    top: 'sides',
+    facialHair: 'beardLight',
+    facialHairProbability: '100',
+    clothing: 'blazerAndSweater',
+    clothesColor: '25557c',
+    accessoriesProbability: '0',
+    skinColor: 'edb98a',
+  },
+];
+
+function avatarUrl(config: Record<string, string>) {
+  const params = new URLSearchParams({ backgroundType: 'gradientLinear', ...config });
+  return `https://api.dicebear.com/9.x/avataaars/svg?${params.toString()}`;
+}
 
 export function FoundersContent() {
   const { t } = useLanguage();
@@ -47,7 +100,7 @@ export function FoundersContent() {
                 >
                   <div className="relative">
                     <img
-                      src={`https://api.dicebear.com/9.x/avataaars/svg?seed=${AVATAR_SEEDS[i]}&backgroundType=gradientLinear`}
+                      src={avatarUrl(AVATAR_CONFIGS[i])}
                       alt={member.name}
                       className="h-28 w-28 rounded-2xl bg-[hsl(var(--muted))] ring-1 ring-[hsl(var(--border))]"
                     />
