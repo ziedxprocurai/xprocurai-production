@@ -4,22 +4,27 @@ import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { Menu, X, Hexagon, LogOut, User, Settings, LayoutDashboard, ChevronDown, Shield } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
-
-const navLinks = [
-  { label: 'Features', href: '#features' },
-  { label: 'About', href: '#about' },
-  { label: 'Contact', href: '#contact' },
-];
+import { LanguageSwitcher } from '@/components/language-switcher';
+import { useLanguage } from '@/lib/i18n/language-context';
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const { data: session, status } = useSession();
+  const { t } = useLanguage();
   const isAuthenticated = status === 'authenticated' && !!session;
   const isOnboarded = isAuthenticated && (session as any)?.user?.onboarded;
   const isAdmin = isAuthenticated && (session as any)?.user?.isAdmin;
   const authLink = isOnboarded ? '/dashboard' : '/onboarding';
+
+  const navLinks = [
+    { label: t.nav.features, href: '/#features' },
+    { label: t.nav.about, href: '/#about' },
+    { label: t.nav.founders, href: '/founders' },
+    { label: t.nav.investors, href: '/investors' },
+    { label: t.nav.contact, href: '/#contact' },
+  ];
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -59,6 +64,7 @@ export function Navbar() {
 
         {/* Desktop CTA */}
         <div className="hidden items-center gap-3 md:flex">
+          <LanguageSwitcher />
           <ThemeToggle />
           {isAuthenticated ? (
             <div className="relative" ref={userMenuRef}>
@@ -139,13 +145,13 @@ export function Navbar() {
                 href="/auth/signin"
                 className="rounded-lg px-4 py-2 text-sm font-medium text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))]"
               >
-                Sign In
+                {t.nav.signIn}
               </a>
               <a
                 href="/auth/signin"
                 className="rounded-lg bg-[hsl(var(--primary))] px-5 py-2 text-sm font-medium text-white shadow-sm transition-all hover:opacity-90"
               >
-                Start Free
+                {t.nav.startFree}
               </a>
             </>
           )}
@@ -153,6 +159,7 @@ export function Navbar() {
 
         {/* Mobile Toggle */}
         <div className="flex items-center gap-2 md:hidden">
+          <LanguageSwitcher />
           <ThemeToggle />
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
@@ -242,13 +249,13 @@ export function Navbar() {
                   href="/auth/signin"
                   className="rounded-lg px-4 py-2.5 text-sm font-medium text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
                 >
-                  Sign In
+                  {t.nav.signIn}
                 </a>
                 <a
                   href="/auth/signin"
                   className="mt-1 rounded-lg bg-[hsl(var(--primary))] px-4 py-2.5 text-center text-sm font-medium text-white"
                 >
-                  Start Free
+                  {t.nav.startFree}
                 </a>
               </>
             )}

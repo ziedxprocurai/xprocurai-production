@@ -1,6 +1,11 @@
+'use client';
+
 import { ArrowRight, Chrome } from 'lucide-react';
+import { useLanguage } from '@/lib/i18n/language-context';
 
 export function Hero() {
+  const { t } = useLanguage();
+
   return (
     <section className="relative overflow-hidden pt-32 pb-20 lg:pt-40 lg:pb-32">
       {/* Background gradient orbs */}
@@ -17,23 +22,21 @@ export function Hero() {
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
           </span>
-          Now in Early Access — AI-Powered Procurement
+          {t.hero.badge}
         </div>
 
         {/* Headline */}
         <h1 className="mx-auto max-w-4xl text-4xl font-bold leading-[1.1] tracking-tight text-[hsl(var(--foreground))] sm:text-5xl md:text-6xl lg:text-7xl">
-          Discover, qualify &amp; manage
+          {t.hero.title1}
           <br />
           <span className="bg-gradient-to-r from-[hsl(var(--primary))] via-[hsl(221,91%,60%)] to-[hsl(250,80%,60%)] bg-clip-text text-transparent">
-            suppliers intelligently
+            {t.hero.title2}
           </span>
         </h1>
 
         {/* Subheadline */}
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-[hsl(var(--muted-foreground))] md:text-xl">
-          The AI-powered Supplier Intelligence Platform that helps enterprises discover
-          new suppliers, streamline onboarding, and prepare for ERP/SAP integration — all
-          from a single pane of glass.
+          {t.hero.subtitle}
         </p>
 
         {/* CTAs */}
@@ -42,21 +45,21 @@ export function Hero() {
             href="/auth/signin"
             className="group inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-[hsl(var(--primary))]/25 transition-all hover:shadow-xl hover:shadow-[hsl(var(--primary))]/30 hover:opacity-95"
           >
-            Start Free
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+            {t.hero.ctaPrimary}
+            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 rtl:rotate-180" />
           </a>
           <a
             href="/auth/signin"
             className="inline-flex items-center gap-2.5 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-7 py-3.5 text-sm font-semibold text-[hsl(var(--foreground))] shadow-sm transition-all hover:bg-[hsl(var(--muted))]/80"
           >
             <Chrome className="h-4 w-4" />
-            Sign in with Google
+            {t.hero.ctaSecondary}
           </a>
         </div>
 
         {/* Social proof */}
         <p className="mt-12 text-sm text-[hsl(var(--muted-foreground))]/70">
-          Trusted by procurement teams at 50+ enterprises worldwide
+          {t.hero.socialProof}
         </p>
 
         {/* Dashboard preview */}

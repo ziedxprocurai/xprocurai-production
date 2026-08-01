@@ -1,3 +1,5 @@
+'use client';
+
 import {
   Search,
   BrainCircuit,
@@ -13,6 +15,7 @@ import {
   ArrowLeftRight,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useLanguage } from '@/lib/i18n/language-context';
 
 interface FeatureDetail {
   icon: LucideIcon;
@@ -111,73 +114,65 @@ function FeatureSection({
 }
 
 export function SupplierDiscovery() {
+  const { t } = useLanguage();
+  const f = t.features.supplierDiscovery;
+  const icons = [Globe, Filter, Star, TrendingUp];
   return (
     <FeatureSection
       id="features"
-      badge="Supplier Discovery"
-      title="Find the right suppliers — faster than ever"
-      description="Search across a global supplier network using intelligent filters. Surface qualified vendors by industry, geography, certification, and capability — without manual research."
+      badge={f.badge}
+      title={f.title}
+      description={f.description}
       icon={Search}
-      details={[
-        { icon: Globe, text: 'Global supplier database with real-time enrichment' },
-        { icon: Filter, text: 'Advanced multi-criteria filtering and smart search' },
-        { icon: Star, text: 'Supplier ratings, certifications, and compliance badges' },
-        { icon: TrendingUp, text: 'Market intelligence and supplier risk scoring' },
-      ]}
+      details={f.details.map((text, i) => ({ icon: icons[i], text }))}
     />
   );
 }
 
 export function AIIntelligence() {
+  const { t } = useLanguage();
+  const f = t.features.aiIntelligence;
+  const icons = [BrainCircuit, TrendingUp, FileCheck, Star];
   return (
     <FeatureSection
-      badge="AI-Powered Intelligence"
-      title="Let AI do the heavy lifting"
-      description="Our AI engine analyzes supplier data, identifies patterns, and delivers actionable recommendations so your procurement team can focus on strategic decisions instead of spreadsheets."
+      badge={f.badge}
+      title={f.title}
+      description={f.description}
       icon={BrainCircuit}
       reversed
-      details={[
-        { icon: BrainCircuit, text: 'AI-powered supplier scoring and risk assessment' },
-        { icon: TrendingUp, text: 'Predictive analytics for supply chain disruptions' },
-        { icon: FileCheck, text: 'Automated compliance and document verification' },
-        { icon: Star, text: 'Smart recommendations based on procurement history' },
-      ]}
+      details={f.details.map((text, i) => ({ icon: icons[i], text }))}
     />
   );
 }
 
 export function Onboarding() {
+  const { t } = useLanguage();
+  const f = t.features.onboarding;
+  const icons = [Users, FileCheck, UserCheck, Building2];
   return (
     <FeatureSection
       id="about"
-      badge="Buyer & Supplier Onboarding"
-      title="Onboard buyers and suppliers in minutes, not weeks"
-      description="Streamline the entire onboarding lifecycle — from invitation and document collection to approval workflows. Configurable forms, automated reminders, and full audit trails."
+      badge={f.badge}
+      title={f.title}
+      description={f.description}
       icon={UserCheck}
-      details={[
-        { icon: Users, text: 'Self-service registration portals for buyers and suppliers' },
-        { icon: FileCheck, text: 'Configurable document collection and verification' },
-        { icon: UserCheck, text: 'Multi-step approval workflows with role-based access' },
-        { icon: Building2, text: 'Organization profiles with hierarchy and contacts' },
-      ]}
+      details={f.details.map((text, i) => ({ icon: icons[i], text }))}
     />
   );
 }
 
 export function ERPIntegration() {
+  const { t } = useLanguage();
+  const f = t.features.erp;
+  const icons = [ArrowLeftRight, Plug, FileCheck, Building2];
   return (
     <FeatureSection
-      badge="ERP/SAP-Ready"
-      title="Built for enterprise integration from day one"
-      description="xProcurAI is designed with ERP and SAP integration in mind. Standardized data models, webhook-ready APIs, and export formats ensure a smooth path to your enterprise systems."
+      badge={f.badge}
+      title={f.title}
+      description={f.description}
       icon={Plug}
       reversed
-      details={[
-        { icon: ArrowLeftRight, text: 'RESTful API with webhook event notifications' },
-        { icon: Plug, text: 'Pre-built connectors for SAP, Oracle, and Microsoft Dynamics' },
-        { icon: FileCheck, text: 'Standardized master data formats (CSV, XML, JSON)' },
-        { icon: Building2, text: 'Enterprise SSO and directory sync (SAML, OIDC)' },
-      ]}
+      details={f.details.map((text, i) => ({ icon: icons[i], text }))}
     />
   );
 }
