@@ -8,6 +8,10 @@
 [build.environment]
   NODE_VERSION = "22"
   AUTH_TRUST_HOST = "true"
+  # Pins the NextAuth/Google OAuth redirect_uri to the canonical custom domain,
+  # regardless of the internal Netlify host (default *.netlify.app alias or
+  # deploy-preview hash) that actually serves the request.
+  AUTH_URL = "https://xprocur.ai"
 
 # Next.js on Netlify plugin
 [[plugins]]

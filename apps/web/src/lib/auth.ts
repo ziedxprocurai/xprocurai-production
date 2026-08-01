@@ -67,6 +67,11 @@ async function refreshUserData(userId: string) {
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  // trustHost is required on Netlify (non-Vercel) deployments, but the actual
+  // OAuth redirect_uri is pinned via the AUTH_URL env var (set to
+  // https://xprocur.ai) so only the canonical custom domain is ever used,
+  // regardless of which internal Netlify host serves the request.
+  trustHost: true,
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
