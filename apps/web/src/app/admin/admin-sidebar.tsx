@@ -18,10 +18,12 @@ import {
   ChevronDown,
   Home,
   KeyRound,
+  Compass,
 } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
 
 const NAV_ITEMS = [
+  { label: 'X Discovery', icon: Compass, href: '/dashboard/discovery' },
   { label: 'Trust & Verification', icon: Shield, href: '/admin/verification' },
   { label: 'AI Scraper', icon: Bot, href: '/admin/scraper' },
   { label: 'Provider Import AI', icon: KeyRound, href: '/admin/provider-import-settings' },

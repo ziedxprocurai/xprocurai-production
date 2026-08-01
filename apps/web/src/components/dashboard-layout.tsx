@@ -19,11 +19,13 @@ import {
   Home,
   ShoppingCart,
   FileSpreadsheet,
+  Compass,
 } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
 
 const NAV_ITEMS = [
   { label: 'Home', icon: Home, href: '/dashboard' },
+  { label: 'X Discovery', icon: Compass, href: '/dashboard/discovery' },
   { label: 'Products', icon: Package, href: '/dashboard/products' },
   { label: 'RFQs', icon: FileText, href: '/dashboard/rfqs' },
   { label: 'ERP Integration', icon: TrendingUp, href: '/dashboard/erp' },
