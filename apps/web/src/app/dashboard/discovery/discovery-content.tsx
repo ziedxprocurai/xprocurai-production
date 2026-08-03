@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import {
   Search,
   Users,
   Building2,
   Loader2,
   Mail,
+  Phone,
   Linkedin,
   MapPin,
   Briefcase,
@@ -15,9 +16,18 @@ import {
   Info,
   X,
   Compass,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Zap,
+  DollarSign,
+  Cpu,
 } from 'lucide-react';
 
 type Tab = 'people' | 'companies';
+
+const SENIORITIES = ['owner', 'founder', 'c_suite', 'partner', 'vp', 'head', 'director', 'manager', 'senior', 'entry', 'intern'];
+const EMAIL_STATUSES = ['verified', 'unverified', 'likely to engage', 'unavailable'];
 
 interface ApolloPerson {
   id: string;
@@ -43,29 +53,65 @@ interface ApolloCompany {
   website_url?: string;
   industry?: string;
   estimated_num_employees?: number;
+  annual_revenue?: number;
   city?: string;
   state?: string;
   country?: string;
   linkedin_url?: string;
   short_description?: string;
+  current_technologies?: { name: string }[];
+}
+
+interface EnrichedPersonState {
+  email?: string;
+  emailLoading?: boolean;
+  emailError?: string;
+  phoneStatus?: 'pending' | 'success' | 'error';
+  phoneNumbers?: string[];
+  phoneError?: string;
+}
+
+interface UsageStats {
+  available: boolean;
+  [key: string]: unknown;
 }
 
 const PAGE_SIZE = 10;
+const PHONE_POLL_INTERVAL_MS = 4000;
+const PHONE_POLL_MAX_ATTEMPTS = 10;
 
 export function DiscoveryContent() {
   const [tab, setTab] = useState<Tab>('people');
+  const [showInfoPanel, setShowInfoPanel] = useState(true);
+  const [showPersonAdvanced, setShowPersonAdvanced] = useState(false);
+  const [showCompanyAdvanced, setShowCompanyAdvanced] = useState(false);
 
   // People filters
   const [personKeywords, setPersonKeywords] = useState('');
   const [personTitles, setPersonTitles] = useState('');
+  const [includeSimilarTitles, setIncludeSimilarTitles] = useState(true);
   const [personLocations, setPersonLocations] = useState('');
   const [orgDomain, setOrgDomain] = useState('');
+  const [seniorities, setSeniorities] = useState<string[]>([]);
+  const [emailStatuses, setEmailStatuses] = useState<string[]>([]);
+  const [personEmployeeRange, setPersonEmployeeRange] = useState('');
+  const [personTechnologies, setPersonTechnologies] = useState('');
+  const [personRevenueMin, setPersonRevenueMin] = useState('');
+  const [personRevenueMax, setPersonRevenueMax] = useState('');
 
   // Company filters
   const [companyName, setCompanyName] = useState('');
   const [companyLocations, setCompanyLocations] = useState('');
+  const [companyNotLocations, setCompanyNotLocations] = useState('');
   const [companyKeywords, setCompanyKeywords] = useState('');
   const [employeeRange, setEmployeeRange] = useState('');
+  const [companyTechnologies, setCompanyTechnologies] = useState('');
+  const [companyRevenueMin, setCompanyRevenueMin] = useState('');
+  const [companyRevenueMax, setCompanyRevenueMax] = useState('');
+  const [fundingMin, setFundingMin] = useState('');
+  const [fundingMax, setFundingMax] = useState('');
+  const [jobTitles, setJobTitles] = useState('');
+  const [jobLocations, setJobLocations] = useState('');
 
   const [people, setPeople] = useState<ApolloPerson[]>([]);
   const [companies, setCompanies] = useState<ApolloCompany[]>([]);
@@ -74,6 +120,15 @@ export function DiscoveryContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
+  const [enriched, setEnriched] = useState<Record<string, EnrichedPersonState>>({});
+  const [usage, setUsage] = useState<UsageStats | null>(null);
+
+  useEffect(() => {
+    fetch('/api/discovery/usage')
+      .then((res) => res.json())
+      .then((data) => setUsage(data))
+      .catch(() => setUsage({ available: false }));
+  }, []);
 
   function splitList(value: string): string[] | undefined {
     const items = value
@@ -81,6 +136,10 @@ export function DiscoveryContent() {
       .map((v) => v.trim())
       .filter(Boolean);
     return items.length ? items : undefined;
+  }
+
+  function toggleFromArray(list: string[], value: string, setList: (next: string[]) => void) {
+    setList(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   }
 
   async function runPeopleSearch(targetPage: number) {
@@ -93,8 +152,15 @@ export function DiscoveryContent() {
         body: JSON.stringify({
           q_keywords: personKeywords || undefined,
           person_titles: splitList(personTitles),
+          include_similar_titles: includeSimilarTitles,
           person_locations: splitList(personLocations),
+          person_seniorities: seniorities.length ? seniorities : undefined,
+          contact_email_status: emailStatuses.length ? emailStatuses : undefined,
           q_organization_domains_list: splitList(orgDomain),
+          organization_num_employees_ranges: splitList(personEmployeeRange),
+          currently_using_any_of_technology_uids: splitList(personTechnologies),
+          'revenue_range[min]': personRevenueMin ? Number(personRevenueMin) : undefined,
+          'revenue_range[max]': personRevenueMax ? Number(personRevenueMax) : undefined,
           page: targetPage,
           per_page: PAGE_SIZE,
         }),
@@ -106,6 +172,7 @@ export function DiscoveryContent() {
       setPeople(data.people || []);
       setTotalResults(data.pagination?.total_entries ?? null);
       setPage(targetPage);
+      setEnriched({});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to connect to the server');
       setPeople([]);
@@ -125,8 +192,16 @@ export function DiscoveryContent() {
         body: JSON.stringify({
           q_organization_name: companyName || undefined,
           organization_locations: splitList(companyLocations),
+          organization_not_locations: splitList(companyNotLocations),
           q_organization_keyword_tags: splitList(companyKeywords),
           organization_num_employees_ranges: splitList(employeeRange),
+          currently_using_any_of_technology_uids: splitList(companyTechnologies),
+          'revenue_range[min]': companyRevenueMin ? Number(companyRevenueMin) : undefined,
+          'revenue_range[max]': companyRevenueMax ? Number(companyRevenueMax) : undefined,
+          'total_funding_range[min]': fundingMin ? Number(fundingMin) : undefined,
+          'total_funding_range[max]': fundingMax ? Number(fundingMax) : undefined,
+          q_organization_job_titles: splitList(jobTitles),
+          organization_job_locations: splitList(jobLocations),
           page: targetPage,
           per_page: PAGE_SIZE,
         }),
@@ -164,10 +239,86 @@ export function DiscoveryContent() {
     setCompanies([]);
     setTotalResults(null);
     setPage(1);
+    setEnriched({});
   }
 
   function locationLabel(item: { city?: string; state?: string; country?: string }) {
     return [item.city, item.state, item.country].filter(Boolean).join(', ') || '—';
+  }
+
+  async function handleGetEmail(person: ApolloPerson) {
+    setEnriched((prev) => ({ ...prev, [person.id]: { ...prev[person.id], emailLoading: true, emailError: undefined } }));
+    try {
+      const res = await fetch('/api/discovery/people/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: person.id, revealEmail: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to reveal email');
+      const email = data?.person?.email || data?.email;
+      setEnriched((prev) => ({
+        ...prev,
+        [person.id]: { ...prev[person.id], emailLoading: false, email: email || undefined, emailError: email ? undefined : 'No email available' },
+      }));
+    } catch (err) {
+      setEnriched((prev) => ({
+        ...prev,
+        [person.id]: { ...prev[person.id], emailLoading: false, emailError: err instanceof Error ? err.message : 'Failed to reveal email' },
+      }));
+    }
+  }
+
+  async function handleGetPhone(person: ApolloPerson) {
+    setEnriched((prev) => ({ ...prev, [person.id]: { ...prev[person.id], phoneStatus: 'pending', phoneError: undefined } }));
+    try {
+      const res = await fetch('/api/discovery/people/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: person.id, revealPhone: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to request phone number');
+      const token = data?.phoneRevealToken;
+      if (!token) throw new Error('No reveal token returned');
+      pollPhoneStatus(person.id, token, 0);
+    } catch (err) {
+      setEnriched((prev) => ({
+        ...prev,
+        [person.id]: { ...prev[person.id], phoneStatus: 'error', phoneError: err instanceof Error ? err.message : 'Failed to request phone number' },
+      }));
+    }
+  }
+
+  function pollPhoneStatus(personId: string, token: string, attempt: number) {
+    if (attempt >= PHONE_POLL_MAX_ATTEMPTS) {
+      setEnriched((prev) => ({
+        ...prev,
+        [personId]: { ...prev[personId], phoneStatus: 'error', phoneError: 'Timed out waiting for Apollo webhook' },
+      }));
+      return;
+    }
+    setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/discovery/people/phone-status?token=${token}`);
+        const data = await res.json();
+        if (data.status === 'success') {
+          setEnriched((prev) => ({
+            ...prev,
+            [personId]: { ...prev[personId], phoneStatus: 'success', phoneNumbers: (data.phoneNumbers || []).map((p: any) => p.raw_number || p.sanitized_number).filter(Boolean) },
+          }));
+        } else if (data.status === 'error') {
+          setEnriched((prev) => ({
+            ...prev,
+            [personId]: { ...prev[personId], phoneStatus: 'error', phoneError: data.error || 'No phone number found' },
+          }));
+        } else {
+          pollPhoneStatus(personId, token, attempt + 1);
+        }
+      } catch {
+        pollPhoneStatus(personId, token, attempt + 1);
+      }
+    }, PHONE_POLL_INTERVAL_MS);
   }
 
   const totalPages = totalResults ? Math.max(1, Math.ceil(totalResults / PAGE_SIZE)) : 1;
@@ -176,7 +327,7 @@ export function DiscoveryContent() {
     <div className="min-h-screen bg-[hsl(var(--background))] p-6 lg:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
         {/* Header */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 shadow-sm">
               <Compass className="h-6 w-6 text-white" />
@@ -188,7 +339,45 @@ export function DiscoveryContent() {
               </p>
             </div>
           </div>
+          {usage?.available && (
+            <div className="flex items-center gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-2 text-sm">
+              <Zap className="h-4 w-4 text-amber-500" />
+              <span className="text-[hsl(var(--muted-foreground))]">Apollo API usage available in your workspace</span>
+            </div>
+          )}
         </div>
+
+        {/* Feature-parity info panel */}
+        {showInfoPanel && (
+          <div className="relative rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
+            <button
+              onClick={() => setShowInfoPanel(false)}
+              className="absolute right-3 top-3 rounded-lg p-1 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <div className="flex items-start gap-3">
+              <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <div className="space-y-1.5 pr-6">
+                <p className="font-semibold text-[hsl(var(--foreground))]">What this covers vs. the Apollo app</p>
+                <p className="text-[hsl(var(--muted-foreground))]">
+                  Every filter below maps to a documented Apollo API parameter (job titles, seniority, locations,
+                  employee/revenue ranges, technologies, email status, job postings, funding). "Get email" / "Get
+                  phone" use the real People Enrichment endpoint, including async phone-number webhooks.
+                </p>
+                <p className="text-[hsl(var(--muted-foreground))]">
+                  <strong className="text-[hsl(var(--foreground))]">Not reproducible via the public API</strong> —
+                  these Apollo app features have no documented REST endpoint, so they can't be built here:{' '}
+                  <em>AI Filters / Research with AI</em> (internal ML query builder), <em>People &amp; Company
+                  Lookalikes</em> (proprietary similarity model), <em>Buying Intent</em> scores/topics (separate
+                  premium intent-data product), <em>SIC &amp; NAICS codes, Market Segments, Website Visitors</em>{' '}
+                  (app-only filters), and <em>Lists / Saved Searches / Workflows / Sequences</em> (CRM features tied
+                  to your own Apollo seat, not the search API).
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1.5 w-fit">
@@ -255,6 +444,104 @@ export function DiscoveryContent() {
                   className="input-field"
                 />
               </Field>
+
+              <label className="col-span-full flex w-fit items-center gap-2 text-sm text-[hsl(var(--foreground))]">
+                <input
+                  type="checkbox"
+                  checked={includeSimilarTitles}
+                  onChange={(e) => setIncludeSimilarTitles(e.target.checked)}
+                  className="h-4 w-4 rounded border-[hsl(var(--border))]"
+                />
+                Include people with similar job titles
+              </label>
+
+              <button
+                type="button"
+                onClick={() => setShowPersonAdvanced((v) => !v)}
+                className="col-span-full flex w-fit items-center gap-1.5 text-sm font-medium text-[hsl(var(--primary))]"
+              >
+                {showPersonAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                Advanced filters
+              </button>
+
+              {showPersonAdvanced && (
+                <>
+                  <div className="col-span-full">
+                    <span className="mb-2 block text-xs font-medium text-[hsl(var(--muted-foreground))]">Seniority</span>
+                    <div className="flex flex-wrap gap-2">
+                      {SENIORITIES.map((s) => (
+                        <button
+                          type="button"
+                          key={s}
+                          onClick={() => toggleFromArray(seniorities, s, setSeniorities)}
+                          className={`rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors ${
+                            seniorities.includes(s)
+                              ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-white'
+                              : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
+                          }`}
+                        >
+                          {s.replace('_', ' ')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="col-span-full">
+                    <span className="mb-2 block text-xs font-medium text-[hsl(var(--muted-foreground))]">Email status</span>
+                    <div className="flex flex-wrap gap-2">
+                      {EMAIL_STATUSES.map((s) => (
+                        <button
+                          type="button"
+                          key={s}
+                          onClick={() => toggleFromArray(emailStatuses, s, setEmailStatuses)}
+                          className={`rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors ${
+                            emailStatuses.includes(s)
+                              ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-white'
+                              : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
+                          }`}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Field label="Employer size (e.g. 1,10)">
+                    <input
+                      value={personEmployeeRange}
+                      onChange={(e) => setPersonEmployeeRange(e.target.value)}
+                      placeholder="1,10, 250,500"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Employer technologies">
+                    <input
+                      value={personTechnologies}
+                      onChange={(e) => setPersonTechnologies(e.target.value)}
+                      placeholder="salesforce, wordpress_org"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Employer revenue min ($)">
+                    <input
+                      type="number"
+                      value={personRevenueMin}
+                      onChange={(e) => setPersonRevenueMin(e.target.value)}
+                      placeholder="500000"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Employer revenue max ($)">
+                    <input
+                      type="number"
+                      value={personRevenueMax}
+                      onChange={(e) => setPersonRevenueMax(e.target.value)}
+                      placeholder="50000000"
+                      className="input-field"
+                    />
+                  </Field>
+                </>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -290,6 +577,88 @@ export function DiscoveryContent() {
                   className="input-field"
                 />
               </Field>
+
+              <button
+                type="button"
+                onClick={() => setShowCompanyAdvanced((v) => !v)}
+                className="col-span-full flex w-fit items-center gap-1.5 text-sm font-medium text-[hsl(var(--primary))]"
+              >
+                {showCompanyAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                Advanced filters
+              </button>
+
+              {showCompanyAdvanced && (
+                <>
+                  <Field label="Exclude locations">
+                    <input
+                      value={companyNotLocations}
+                      onChange={(e) => setCompanyNotLocations(e.target.value)}
+                      placeholder="ireland, seoul"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Technologies used">
+                    <input
+                      value={companyTechnologies}
+                      onChange={(e) => setCompanyTechnologies(e.target.value)}
+                      placeholder="salesforce, google_analytics"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Revenue min ($)">
+                    <input
+                      type="number"
+                      value={companyRevenueMin}
+                      onChange={(e) => setCompanyRevenueMin(e.target.value)}
+                      placeholder="300000"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Revenue max ($)">
+                    <input
+                      type="number"
+                      value={companyRevenueMax}
+                      onChange={(e) => setCompanyRevenueMax(e.target.value)}
+                      placeholder="50000000"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Total funding min ($)">
+                    <input
+                      type="number"
+                      value={fundingMin}
+                      onChange={(e) => setFundingMin(e.target.value)}
+                      placeholder="5000000"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Total funding max ($)">
+                    <input
+                      type="number"
+                      value={fundingMax}
+                      onChange={(e) => setFundingMax(e.target.value)}
+                      placeholder="350000000"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Active job posting titles">
+                    <input
+                      value={jobTitles}
+                      onChange={(e) => setJobTitles(e.target.value)}
+                      placeholder="sales manager, research analyst"
+                      className="input-field"
+                    />
+                  </Field>
+                  <Field label="Job posting locations">
+                    <input
+                      value={jobLocations}
+                      onChange={(e) => setJobLocations(e.target.value)}
+                      placeholder="atlanta, japan"
+                      className="input-field"
+                    />
+                  </Field>
+                </>
+              )}
             </div>
           )}
 
@@ -369,13 +738,54 @@ export function DiscoveryContent() {
                       <MapPin className="h-3.5 w-3.5" />
                       {locationLabel(person)}
                     </span>
-                    {person.email && (
-                      <span className="flex items-center gap-1.5">
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 border-t border-[hsl(var(--border))] pt-3">
+                    {enriched[person.id]?.email ? (
+                      <span className="flex items-center gap-1.5 rounded-lg bg-[hsl(var(--muted))] px-2.5 py-1.5 text-xs text-[hsl(var(--foreground))]">
                         <Mail className="h-3.5 w-3.5" />
-                        {person.email}
+                        {enriched[person.id].email}
                       </span>
+                    ) : (
+                      <button
+                        onClick={() => handleGetEmail(person)}
+                        disabled={enriched[person.id]?.emailLoading}
+                        className="flex items-center gap-1.5 rounded-lg border border-[hsl(var(--border))] px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] disabled:opacity-60"
+                      >
+                        {enriched[person.id]?.emailLoading ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Mail className="h-3.5 w-3.5" />
+                        )}
+                        Get email
+                      </button>
+                    )}
+
+                    {enriched[person.id]?.phoneStatus === 'success' ? (
+                      <span className="flex items-center gap-1.5 rounded-lg bg-[hsl(var(--muted))] px-2.5 py-1.5 text-xs text-[hsl(var(--foreground))]">
+                        <Phone className="h-3.5 w-3.5" />
+                        {enriched[person.id].phoneNumbers?.[0] || 'No number'}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleGetPhone(person)}
+                        disabled={enriched[person.id]?.phoneStatus === 'pending'}
+                        className="flex items-center gap-1.5 rounded-lg border border-[hsl(var(--border))] px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] disabled:opacity-60"
+                      >
+                        {enriched[person.id]?.phoneStatus === 'pending' ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Phone className="h-3.5 w-3.5" />
+                        )}
+                        {enriched[person.id]?.phoneStatus === 'pending' ? 'Waiting for Apollo...' : 'Get phone'}
+                      </button>
                     )}
                   </div>
+                  {(enriched[person.id]?.emailError || enriched[person.id]?.phoneError) && (
+                    <p className="text-xs text-red-500">
+                      {enriched[person.id]?.emailError || enriched[person.id]?.phoneError}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -446,7 +856,27 @@ export function DiscoveryContent() {
                         {company.website_url.replace(/^https?:\/\//, '')}
                       </span>
                     )}
+                    {typeof company.annual_revenue === 'number' && (
+                      <span className="flex items-center gap-1.5">
+                        <DollarSign className="h-3.5 w-3.5" />
+                        ${company.annual_revenue.toLocaleString()} revenue
+                      </span>
+                    )}
                   </div>
+
+                  {!!company.current_technologies?.length && (
+                    <div className="flex flex-wrap items-center gap-1.5 border-t border-[hsl(var(--border))] pt-3">
+                      <Cpu className="h-3.5 w-3.5 text-[hsl(var(--muted-foreground))]" />
+                      {company.current_technologies.slice(0, 6).map((tech) => (
+                        <span
+                          key={tech.name}
+                          className="rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-[11px] text-[hsl(var(--muted-foreground))]"
+                        >
+                          {tech.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

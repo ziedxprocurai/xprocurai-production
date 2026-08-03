@@ -12,6 +12,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
+    // Body keys are passed straight through to Apollo (see ApolloCompanySearchParams),
+    // so the client can send any officially documented organization-search filter.
     const data = await searchApolloCompanies(body);
     return NextResponse.json(data);
   } catch (err) {

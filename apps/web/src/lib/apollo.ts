@@ -13,6 +13,8 @@
  * Docs:
  * - People search:        https://docs.apollo.io/reference/people-api-search
  * - Organization search:  https://docs.apollo.io/reference/organization-search
+ * - People enrichment:    https://docs.apollo.io/reference/people-enrichment
+ * - API usage stats:      https://docs.apollo.io/reference/view-api-usage-stats
  */
 
 const APOLLO_API_BASE = 'https://api.apollo.io/api/v1';
@@ -61,6 +63,12 @@ export interface ApolloPersonSearchParams {
   organization_locations?: string[];
   q_organization_domains_list?: string[];
   organization_num_employees_ranges?: string[];
+  contact_email_status?: string[];
+  'revenue_range[min]'?: number;
+  'revenue_range[max]'?: number;
+  currently_using_all_of_technology_uids?: string[];
+  currently_using_any_of_technology_uids?: string[];
+  organization_ids?: string[];
   page?: number;
   per_page?: number;
 }
@@ -72,6 +80,20 @@ export interface ApolloCompanySearchParams {
   organization_num_employees_ranges?: string[];
   q_organization_keyword_tags?: string[];
   currently_using_any_of_technology_uids?: string[];
+  currently_using_all_of_technology_uids?: string[];
+  'revenue_range[min]'?: number;
+  'revenue_range[max]'?: number;
+  'latest_funding_amount_range[min]'?: number;
+  'latest_funding_amount_range[max]'?: number;
+  'total_funding_range[min]'?: number;
+  'total_funding_range[max]'?: number;
+  'latest_funding_date_range[min]'?: string;
+  'latest_funding_date_range[max]'?: string;
+  q_organization_job_titles?: string[];
+  organization_job_locations?: string[];
+  'organization_num_jobs_range[min]'?: number;
+  'organization_num_jobs_range[max]'?: number;
+  organization_ids?: string[];
   page?: number;
   per_page?: number;
 }
@@ -84,4 +106,38 @@ export function searchApolloPeople(params: ApolloPersonSearchParams) {
 /** Search for organizations/companies in the Apollo database. */
 export function searchApolloCompanies(params: ApolloCompanySearchParams) {
   return apolloRequest('/mixed_companies/search', { ...params });
+}
+
+export interface ApolloPersonMatchParams {
+  id?: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  domain?: string;
+  organization_name?: string;
+  reveal_personal_emails?: boolean;
+  reveal_phone_number?: boolean;
+  webhook_url?: string;
+}
+
+/**
+ * Enrich a single person record - matches the `id` (or name/email/domain)
+ * returned by `searchApolloPeople` against Apollo's full profile database.
+ * Email reveal is synchronous. Phone reveal is asynchronous: Apollo sends the
+ * verified phone numbers to `webhook_url` a few minutes after this call
+ * returns, so `webhook_url` is required whenever `reveal_phone_number` is true.
+ */
+export function matchApolloPerson(params: ApolloPersonMatchParams) {
+  return apolloRequest('/people/match', { ...params });
+}
+
+/**
+ * View this workspace's Apollo API usage stats and rate limits.
+ * NOTE: this endpoint requires a Master API Key. If a regular API key is
+ * used, Apollo returns a 403/401 - callers should treat that as "unavailable"
+ * rather than a hard failure.
+ */
+export function getApolloUsageStats() {
+  return apolloRequest('/usage_stats/api_usage_stats', {});
 }
