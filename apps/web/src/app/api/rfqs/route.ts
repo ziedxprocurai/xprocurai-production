@@ -37,6 +37,10 @@ export async function POST(req: NextRequest) {
       externalContactEmail,
       externalContactPhone,
       sentVia,
+      // Groups RFQs sent together to multiple companies in one action
+      // (e.g. a multi-select xDiscoveryBeta "Request Quote") so they render
+      // as a single card in RFQ Management. Optional / caller-generated.
+      batchId,
     } = body;
 
     if (!title) {
@@ -70,6 +74,7 @@ export async function POST(req: NextRequest) {
         externalContactEmail: isExternal ? externalContactEmail || null : null,
         externalContactPhone: isExternal ? externalContactPhone || null : null,
         sentVia: isExternal ? sentVia || (externalContactEmail ? 'EMAIL' : 'PHONE') : null,
+        batchId: batchId || null,
       },
       include: {
         buyer: { select: { id: true, legalName: true } },

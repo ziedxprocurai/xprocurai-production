@@ -172,10 +172,18 @@ model RFQ {
   externalContactPhone  String? @map("external_contact_phone")
   sentVia               String? @map("sent_via") // "EMAIL" | "PHONE" (mocked channel)
 
+  // Groups RFQs created together from a single "Request Quote" action against
+  // multiple companies (e.g. selecting several xDiscoveryBeta leads at once).
+  // Each targeted company still gets its own RFQ row/status, but rows sharing
+  // a batchId are rendered as one card in RFQ Management. Null for
+  // single-target RFQs (e.g. the existing Suppliers page flow).
+  batchId String? @map("batch_id")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([leadCompanyId])
+  @@index([batchId])
   @@map("rfqs")
   @@schema("public")
 }

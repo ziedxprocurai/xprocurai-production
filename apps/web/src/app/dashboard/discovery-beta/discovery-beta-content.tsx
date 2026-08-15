@@ -388,6 +388,11 @@ export function DiscoveryBetaContent() {
       return;
     }
 
+    // Shared across every company in this submission so RFQ Management can
+    // regroup them into a single card, even when only one company is
+    // selected (keeps the batch concept consistent regardless of count).
+    const batchId = crypto.randomUUID();
+
     try {
       const results = await Promise.allSettled(
         targets.map((id) => {
@@ -408,6 +413,7 @@ export function DiscoveryBetaContent() {
               externalContactEmail: contact?.email,
               externalContactPhone: contact?.phone,
               sentVia: contact?.email ? 'EMAIL' : 'PHONE',
+              batchId,
             }),
           }).then(async (res) => {
             if (!res.ok) {
