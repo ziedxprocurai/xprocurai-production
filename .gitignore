@@ -53,3 +53,4 @@ deploy/*.secret
 .netlify/
 NETLIFY-DEPLOYMENT-GUIDE.md
 DEPLOYMENT-SUCCESS-FINAL-STEPS.md
+*info
