@@ -20,12 +20,14 @@ import {
   ShoppingCart,
   FileSpreadsheet,
   Compass,
+  Radar,
 } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
 
 const NAV_ITEMS = [
   { label: 'Home', icon: Home, href: '/dashboard' },
   { label: 'X Discovery', icon: Compass, href: '/dashboard/discovery' },
+  { label: 'X Discovery Beta', icon: Radar, href: '/dashboard/discovery-beta', badge: 'BETA' },
   { label: 'Products', icon: Package, href: '/dashboard/products' },
   { label: 'RFQs', icon: FileText, href: '/dashboard/rfqs' },
   { label: 'ERP Integration', icon: TrendingUp, href: '/dashboard/erp' },
@@ -83,8 +85,17 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                       : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]'
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="flex-1 text-left">{item.label}</span>
+                  {'badge' in item && item.badge && (
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-violet-500/15 text-violet-500'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}

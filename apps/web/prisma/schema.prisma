@@ -1,11 +1,13 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_DATABASE_URL")
+  schemas   = ["public", "leadgen"]
 }
 
 model User {
@@ -26,49 +28,57 @@ model User {
   updatedAt    DateTime     @updatedAt @map("updated_at")
 
   @@map("users")
+  @@schema("public")
 }
 
 model Company {
-  id            String        @id @default(cuid())
-  legalName     String        @map("legal_name")
-  website       String?
-  country       String
-  city          String?
-  industry      String?
-  companySize   CompanySize?  @map("company_size")
-  phoneNumber   String?       @map("phone_number")
-  email         String?
-  description   String?
-  roles         CompanyRole[] @default([BUYER])
-  onboardingStatus OnboardingStatus @default(PENDING) @map("onboarding_status")
-  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
-  users         User[]
-  products      Product[]
-  erpConnection ERPConnection?
-  sentRFQs      RFQ[]         @relation("BuyerRFQs")
-  receivedRFQs  RFQ[]         @relation("SupplierRFQs")
+  id                      String                   @id @default(cuid())
+  legalName               String                   @map("legal_name")
+  website                 String?
+  country                 String
+  city                    String?
+  industry                String?
+  companySize             CompanySize?             @map("company_size")
+  phoneNumber             String?                  @map("phone_number")
+  email                   String?
+  description             String?
+  roles                   CompanyRole[]            @default([BUYER])
+  onboardingStatus        OnboardingStatus         @default(PENDING) @map("onboarding_status")
+  verificationStatus      VerificationStatus       @default(PENDING) @map("verification_status")
+  users                   User[]
+  products                Product[]
+  erpConnection           ERPConnection?
+  sentRFQs                RFQ[]                    @relation("BuyerRFQs")
+  receivedRFQs            RFQ[]                    @relation("SupplierRFQs")
   providerImportDocuments ProviderImportDocument[]
   importedProviders       ImportedProvider[]
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
 
   @@map("companies")
+  @@schema("public")
 }
 
 enum Role {
   ADMIN
   USER
   MANAGER
+
+  @@schema("public")
 }
 
 enum AuthProvider {
   LOCAL
   GOOGLE
+
+  @@schema("public")
 }
 
 enum CompanyRole {
   BUYER
   SUPPLIER
+
+  @@schema("public")
 }
 
 enum CompanySize {
@@ -77,12 +87,16 @@ enum CompanySize {
   MEDIUM
   LARGE
   ENTERPRISE
+
+  @@schema("public")
 }
 
 enum OnboardingStatus {
   PENDING
   IN_PROGRESS
   COMPLETED
+
+  @@schema("public")
 }
 
 enum VerificationStatus {
@@ -90,62 +104,88 @@ enum VerificationStatus {
   IN_PROGRESS
   VERIFIED
   REJECTED
+
+  @@schema("public")
 }
 
 model Product {
-  id          String            @id @default(cuid())
+  id          String   @id @default(cuid())
   name        String
   description String?
-  quantity    Int               @default(0)
-  isAvailable Boolean           @default(true) @map("is_available")
-  isVisible   Boolean           @default(true) @map("is_visible")
-  companyId   String            @map("company_id")
-  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  quantity    Int      @default(0)
+  isAvailable Boolean  @default(true) @map("is_available")
+  isVisible   Boolean  @default(true) @map("is_visible")
+  companyId   String   @map("company_id")
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   rfqs        RFQ[]
-  createdAt   DateTime          @default(now()) @map("created_at")
-  updatedAt   DateTime          @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("products")
+  @@schema("public")
 }
 
 model ERPConnection {
-  id                String   @id @default(cuid())
-  erpSystem         ERPSystem @map("erp_system")
-  connectionString  String?  @map("connection_string")
-  apiKey            String?  @map("api_key")
-  credentials       String?
-  isActive          Boolean  @default(false) @map("is_active")
-  companyId         String   @unique @map("company_id")
-  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id               String    @id @default(cuid())
+  erpSystem        ERPSystem @map("erp_system")
+  connectionString String?   @map("connection_string")
+  apiKey           String?   @map("api_key")
+  credentials      String?
+  isActive         Boolean   @default(false) @map("is_active")
+  companyId        String    @unique @map("company_id")
+  company          Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   @@map("erp_connections")
+  @@schema("public")
 }
 
 model RFQ {
-  id          String     @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
   description String?
   quantity    Int?
-  status      RFQStatus  @default(PENDING)
-  buyerId     String     @map("buyer_id")
-  buyer       Company    @relation("BuyerRFQs", fields: [buyerId], references: [id], onDelete: Cascade)
-  supplierId  String     @map("supplier_id")
-  supplier    Company    @relation("SupplierRFQs", fields: [supplierId], references: [id], onDelete: Cascade)
-  productId   String?    @map("product_id")
-  product     Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  status      RFQStatus @default(PENDING)
+  buyerId     String    @map("buyer_id")
+  buyer       Company   @relation("BuyerRFQs", fields: [buyerId], references: [id], onDelete: Cascade)
+  supplierId  String?   @map("supplier_id")
+  supplier    Company?  @relation("SupplierRFQs", fields: [supplierId], references: [id], onDelete: Cascade)
+  productId   String?   @map("product_id")
+  product     Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
   response    String?
-  createdAt   DateTime   @default(now()) @map("created_at")
-  updatedAt   DateTime   @updatedAt @map("updated_at")
 
+  // --- xDiscoveryBeta / external lead RFQs ---
+  // When `isExternal` is true, this RFQ targets a company sourced from the
+  // `leadgen` schema (not yet an onboarded Company on the platform). We do
+  // NOT create a hard FK to `leadgen.companies` here on purpose: that data
+  // is owned/refreshed by an external scraper pipeline, so we snapshot the
+  // contact details we mocked the send with at creation time instead of
+  // relying on a live join, and only keep a soft reference (`leadCompanyId`)
+  // for traceability / "recently contacted" lookups.
+  isExternal            Boolean @default(false) @map("is_external")
+  leadCompanyId         Int?    @map("lead_company_id")
+  externalCompanyName   String? @map("external_company_name")
+  externalCompanyDomain String? @map("external_company_domain")
+  externalContactName   String? @map("external_contact_name")
+  externalContactEmail  String? @map("external_contact_email")
+  externalContactPhone  String? @map("external_contact_phone")
+  sentVia               String? @map("sent_via") // "EMAIL" | "PHONE" (mocked channel)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([leadCompanyId])
   @@map("rfqs")
+  @@schema("public")
 }
 
 enum ERPSystem {
   SAP
   ORACLE_NETSUITE
   MICROSOFT_DYNAMICS_365
+
+  @@schema("public")
 }
 
 enum RFQStatus {
@@ -154,22 +194,25 @@ enum RFQStatus {
   RESPONDED
   ACCEPTED
   REJECTED
+
+  @@schema("public")
 }
 
 model ProviderImportDocument {
-  id           String               @id @default(cuid())
-  fileName     String               @map("file_name")
-  fileSize     Int                  @map("file_size")
-  fileType     String               @map("file_type")
-  status       ProviderImportStatus @default(UPLOADED)
-  errorMessage String?              @map("error_message")
-  companyId    String               @map("company_id")
-  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id           String                 @id @default(cuid())
+  fileName     String                 @map("file_name")
+  fileSize     Int                    @map("file_size")
+  fileType     String                 @map("file_type")
+  status       ProviderImportStatus   @default(UPLOADED)
+  errorMessage String?                @map("error_message")
+  companyId    String                 @map("company_id")
+  company      Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
   records      ProviderImportRecord[]
-  createdAt    DateTime             @default(now()) @map("created_at")
-  updatedAt    DateTime             @updatedAt @map("updated_at")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
 
   @@map("provider_import_documents")
+  @@schema("public")
 }
 
 model ProviderImportRecord {
@@ -193,6 +236,7 @@ model ProviderImportRecord {
   updatedAt     DateTime               @updatedAt @map("updated_at")
 
   @@map("provider_import_records")
+  @@schema("public")
 }
 
 model ImportedProvider {
@@ -213,6 +257,7 @@ model ImportedProvider {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@map("imported_providers")
+  @@schema("public")
 }
 
 model AdminSetting {
@@ -223,6 +268,7 @@ model AdminSetting {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("admin_settings")
+  @@schema("public")
 }
 
 enum ProviderImportStatus {
@@ -230,34 +276,39 @@ enum ProviderImportStatus {
   PROCESSING
   EXTRACTED
   FAILED
+
+  @@schema("public")
 }
 
 enum RecordImportStatus {
   PENDING
   IMPORTED
   SKIPPED
+
+  @@schema("public")
 }
 
 model ScraperJob {
-  id             String            @id @default(cuid())
-  targetUrl      String            @map("target_url")
-  companyName    String?           @map("company_name")
-  status         ScraperJobStatus  @default(RUNNING)
-  maxPages       Int               @default(5) @map("max_pages")
-  verifyContacts Boolean           @default(true) @map("verify_contacts")
-  smtpVerify     Boolean           @default(false) @map("smtp_verify")
-  pagesCrawled   Int               @default(0) @map("pages_crawled")
-  pagesFailed    Int               @default(0) @map("pages_failed")
-  emailsFound    Int               @default(0) @map("emails_found")
-  phonesFound    Int               @default(0) @map("phones_found")
-  errorMessage   String?           @map("error_message")
-  createdById    String            @map("created_by_id")
-  createdBy      User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  id             String           @id @default(cuid())
+  targetUrl      String           @map("target_url")
+  companyName    String?          @map("company_name")
+  status         ScraperJobStatus @default(RUNNING)
+  maxPages       Int              @default(5) @map("max_pages")
+  verifyContacts Boolean          @default(true) @map("verify_contacts")
+  smtpVerify     Boolean          @default(false) @map("smtp_verify")
+  pagesCrawled   Int              @default(0) @map("pages_crawled")
+  pagesFailed    Int              @default(0) @map("pages_failed")
+  emailsFound    Int              @default(0) @map("emails_found")
+  phonesFound    Int              @default(0) @map("phones_found")
+  errorMessage   String?          @map("error_message")
+  createdById    String           @map("created_by_id")
+  createdBy      User             @relation(fields: [createdById], references: [id], onDelete: Cascade)
   contacts       ScrapedContact[]
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
 
   @@map("scraper_jobs")
+  @@schema("public")
 }
 
 model ScrapedContact {
@@ -275,21 +326,182 @@ model ScrapedContact {
   createdAt      DateTime            @default(now()) @map("created_at")
 
   @@map("scraped_contacts")
+  @@schema("public")
 }
 
 enum ScraperJobStatus {
   RUNNING
   COMPLETED
   FAILED
+
+  @@schema("public")
 }
 
 enum ScrapedContactType {
   EMAIL
   PHONE
+
+  @@schema("public")
 }
 
 enum ContactReviewStatus {
   PENDING
   APPROVED
   REJECTED
+
+  @@schema("public")
+}
+
+// =====================================================================
+// leadgen schema — xDiscoveryBeta data source
+// =====================================================================
+// IMPORTANT: this schema is owned and populated by a separate application
+// (the ai_scrapper pipeline) and already has live production data. The web
+// app treats it as STRICTLY READ-ONLY / EXTERNAL:
+//   - No `@@index` directives are declared here on purpose, even though a
+//     few would help query performance, so that `prisma migrate`/`db push`
+//     run from this app can NEVER produce a CREATE/ALTER/DROP statement
+//     against the `leadgen` schema — there is intentionally zero DDL
+//     surface here. If you want indexes for these lookups, add them from
+//     the ai_scrapper side (or run the SQL directly) instead of via this
+//     Prisma schema.
+//   - The one exception is `search_query_log`, an insert-only analytics
+//     table whose shape (params/results_count/requester_ip) already exists
+//     for exactly this kind of usage; we only ever INSERT into it, never
+//     alter its structure. Remove the `logLeadSearchQuery()` call in
+//     `src/lib/leadgen.ts` if you'd rather this app not write there either.
+
+enum LeadSourceName {
+  INSEE_SIRENE
+  HUNTER_IO
+  GOOGLE_PLACES
+  CORESIGNAL
+  B2B_TN
+  APII_DIRECTORY
+  RNE_REGISTRY
+  COMPANY_WEBSITE
+  DATA_GOV_TN
+  DATA_GOV_TN_LEGACY @map("data_gov_tn")
+  PATTERN_GUESS
+  MANUAL
+  UNKNOWN
+
+  @@map("sourcename")
+  @@schema("leadgen")
+}
+
+enum LeadValidationStatus {
+  VALID
+  RISKY
+  INVALID
+  DISPOSABLE
+  WEBMAIL
+  GUESSED
+  UNKNOWN
+
+  @@map("validationstatus")
+  @@schema("leadgen")
+}
+
+model LeadCompany {
+  id                            Int            @id @default(autoincrement())
+  name                          String         @db.VarChar
+  siren                         String?        @db.VarChar
+  siret                         String?        @db.VarChar
+  domain                        String?        @db.VarChar
+  sectorCode                    String?        @map("sector_code") @db.VarChar
+  sectorLabel                   String?        @map("sector_label") @db.VarChar
+  sizeRange                     String?        @map("size_range") @db.VarChar
+  city                          String?        @db.VarChar
+  region                        String?        @db.VarChar
+  country                       String?        @db.VarChar
+  source                        LeadSourceName
+  sourceDetail                  String?        @map("source_detail") @db.VarChar
+  fetchedAt                     DateTime?      @map("fetched_at")
+  createdAt                     DateTime?      @default(now()) @map("created_at")
+  updatedAt                     DateTime?      @updatedAt @map("updated_at")
+  hunterDomainSearchAttemptedAt DateTime?      @map("hunter_domain_search_attempted_at")
+  linkedinUrl                   String?        @map("linkedin_url") @db.VarChar
+  websiteScrapeAttemptedAt      DateTime?      @map("website_scrape_attempted_at")
+  rneLookupAttemptedAt          DateTime?      @map("rne_lookup_attempted_at")
+
+  persons LeadPerson[]
+  emails  LeadEmail[]
+  phones  LeadPhone[]
+
+  @@map("companies")
+  @@schema("leadgen")
+}
+
+model LeadPerson {
+  id                           Int            @id @default(autoincrement())
+  companyId                    Int?           @map("company_id")
+  company                      LeadCompany?   @relation(fields: [companyId], references: [id])
+  fullName                     String?        @map("full_name") @db.VarChar
+  firstName                    String?        @map("first_name") @db.VarChar
+  lastName                     String?        @map("last_name") @db.VarChar
+  jobTitle                     String?        @map("job_title") @db.VarChar
+  linkedinUrl                  String?        @map("linkedin_url") @db.VarChar
+  source                       LeadSourceName
+  sourceDetail                 String?        @map("source_detail") @db.VarChar
+  fetchedAt                    DateTime?      @map("fetched_at")
+  createdAt                    DateTime?      @default(now()) @map("created_at")
+  updatedAt                    DateTime?      @updatedAt @map("updated_at")
+  hunterEmailFinderAttemptedAt DateTime?      @map("hunter_email_finder_attempted_at")
+
+  emails LeadEmail[]
+  phones LeadPhone[]
+
+  @@map("persons")
+  @@schema("leadgen")
+}
+
+model LeadEmail {
+  id               Int                   @id @default(autoincrement())
+  personId         Int?                  @map("person_id")
+  person           LeadPerson?           @relation(fields: [personId], references: [id])
+  companyId        Int?                  @map("company_id")
+  company          LeadCompany?          @relation(fields: [companyId], references: [id])
+  email            String                @db.VarChar
+  confidenceScore  Float?                @map("confidence_score")
+  syntaxValid      Boolean?              @map("syntax_valid")
+  mxValid          Boolean?              @map("mx_valid")
+  smtpValid        Boolean?              @map("smtp_valid")
+  isCatchAll       Boolean?              @map("is_catch_all")
+  validationStatus LeadValidationStatus? @map("validation_status")
+  source           LeadSourceName
+  sourceDetail     String?               @map("source_detail") @db.VarChar
+  fetchedAt        DateTime?             @map("fetched_at")
+  createdAt        DateTime?             @default(now()) @map("created_at")
+
+  @@map("emails")
+  @@schema("leadgen")
+}
+
+model LeadPhone {
+  id           Int            @id @default(autoincrement())
+  personId     Int?           @map("person_id")
+  person       LeadPerson?    @relation(fields: [personId], references: [id])
+  companyId    Int?           @map("company_id")
+  company      LeadCompany?   @relation(fields: [companyId], references: [id])
+  number       String         @db.VarChar
+  phoneType    String?        @map("phone_type") @db.VarChar
+  source       LeadSourceName
+  sourceDetail String?        @map("source_detail") @db.VarChar
+  fetchedAt    DateTime?      @map("fetched_at")
+  createdAt    DateTime?      @default(now()) @map("created_at")
+
+  @@map("phones")
+  @@schema("leadgen")
+}
+
+model LeadSearchQueryLog {
+  id           Int       @id @default(autoincrement())
+  params       Json?
+  resultsCount Int?      @map("results_count")
+  requesterIp  String?   @map("requester_ip") @db.VarChar
+  requestedAt  DateTime? @default(now()) @map("requested_at")
+
+  @@map("search_query_log")
+  @@schema("leadgen")
 }

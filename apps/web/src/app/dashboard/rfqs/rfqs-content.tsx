@@ -16,6 +16,9 @@ import {
   AlertCircle,
   Eye,
   X,
+  Mail,
+  Phone,
+  Radar,
 } from 'lucide-react';
 
 interface RFQ {
@@ -44,6 +47,20 @@ interface RFQ {
     name: string;
     description?: string;
   };
+  // xDiscoveryBeta: RFQs sent to leads that aren't onboarded suppliers yet.
+  isExternal?: boolean;
+  leadCompanyId?: number | null;
+  externalCompanyName?: string | null;
+  externalCompanyDomain?: string | null;
+  externalContactName?: string | null;
+  externalContactEmail?: string | null;
+  externalContactPhone?: string | null;
+  sentVia?: string | null;
+}
+
+function supplierName(rfq: RFQ, activeTab: 'sent' | 'received') {
+  if (rfq.isExternal) return rfq.externalCompanyName || 'External lead';
+  return activeTab === 'sent' ? rfq.supplier?.legalName : rfq.buyer?.legalName;
 }
 
 const STATUS_CONFIG = {
@@ -266,9 +283,17 @@ export function RFQsContent() {
                     <div className="flex-1">
                       <div className="mb-3 flex items-start justify-between">
                         <div>
-                          <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">
-                            {rfq.title}
-                          </h3>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">
+                              {rfq.title}
+                            </h3>
+                            {rfq.isExternal && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
+                                <Radar className="h-3 w-3" />
+                                External lead
+                              </span>
+                            )}
+                          </div>
                           {rfq.description && (
                             <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
                               {rfq.description}
@@ -292,12 +317,14 @@ export function RFQsContent() {
                         )}
                         <div className="flex items-center gap-2 text-sm">
                           <Building2 className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
-                          <span className="text-[hsl(var(--foreground))]">
-                            {activeTab === 'sent'
-                              ? rfq.supplier?.legalName
-                              : rfq.buyer?.legalName}
-                          </span>
+                          <span className="text-[hsl(var(--foreground))]">{supplierName(rfq, activeTab)}</span>
                         </div>
+                        {rfq.isExternal && (rfq.externalContactEmail || rfq.externalContactPhone) && (
+                          <div className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+                            {rfq.externalContactEmail ? <Mail className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
+                            <span className="truncate">{rfq.externalContactEmail || rfq.externalContactPhone}</span>
+                          </div>
+                        )}
                         <div className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
                           <span>Qty: {rfq.quantity}</span>
                         </div>
@@ -375,11 +402,43 @@ export function RFQsContent() {
                         {activeTab === 'sent' ? 'Supplier:' : 'Buyer:'}
                       </span>
                       <span className="text-[hsl(var(--muted-foreground))]">
-                        {activeTab === 'sent'
-                          ? selectedRFQ.supplier?.legalName
-                          : selectedRFQ.buyer?.legalName}
+                        {supplierName(selectedRFQ, activeTab)}
                       </span>
+                      {selectedRFQ.isExternal && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
+                          <Radar className="h-3 w-3" />
+                          xDiscovery Beta lead
+                        </span>
+                      )}
                     </div>
+                    {selectedRFQ.isExternal && (
+                      <>
+                        {selectedRFQ.externalContactName && (
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">Contact:</span>
+                            <span className="text-[hsl(var(--muted-foreground))]">{selectedRFQ.externalContactName}</span>
+                          </div>
+                        )}
+                        {selectedRFQ.externalContactEmail && (
+                          <div className="flex items-center gap-2">
+                            <Mail className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
+                            <span className="font-medium">Email used:</span>
+                            <span className="text-[hsl(var(--muted-foreground))]">{selectedRFQ.externalContactEmail}</span>
+                          </div>
+                        )}
+                        {selectedRFQ.externalContactPhone && (
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
+                            <span className="font-medium">Phone used:</span>
+                            <span className="text-[hsl(var(--muted-foreground))]">{selectedRFQ.externalContactPhone}</span>
+                          </div>
+                        )}
+                        <p className="text-xs italic text-[hsl(var(--muted-foreground))]">
+                          This request was sent to a lead sourced from xDiscovery Beta, not yet an onboarded
+                          supplier — the send is mocked for now.
+                        </p>
+                      </>
+                    )}
                     <div className="flex items-center gap-2">
                       <Calendar className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
                       <span className="font-medium">Submitted:</span>
