@@ -34,10 +34,12 @@ export function renderRfqEmail({
   reference,
   payload,
   attachmentNames,
+  attachmentLinks = [],
 }: {
   reference: string;
   payload: RfqRequestPayload;
   attachmentNames: string[];
+  attachmentLinks?: { fileName: string; url: string }[];
 }): { subject: string; html: string } {
   const subject = `[${reference}] ${payload.title}`
     .replace(/[\r\n\t]+/g, ' ')
@@ -105,6 +107,19 @@ export function renderRfqEmail({
            .join('')}</ul>`
       : '';
 
+  // Files too large for sendMail's request-body cap are sent as signed
+  // Supabase download links instead of real attachments.
+  const attachmentLinksBlock =
+    attachmentLinks.length > 0
+      ? `<p style="margin:16px 0 4px;font-weight:600;color:#334155;">Large files (download links valid for 14 days):</p>
+         <ul style="margin:0;padding-left:20px;color:#0f172a;">${attachmentLinks
+           .map(
+             (link) =>
+               `<li><a href="${escapeHtml(link.url)}" style="color:#2563eb;">${escapeHtml(link.fileName)}</a></li>`,
+           )
+           .join('')}</ul>`
+      : '';
+
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -121,6 +136,7 @@ export function renderRfqEmail({
           ${specificationsBlock}
           ${additionalBlock}
           ${attachmentsBlock}
+          ${attachmentLinksBlock}
           <p style="margin:20px 0 8px;">Please reply directly to this email with your quotation and any supporting documents.</p>
           <p style="margin:0 0 16px;font-size:12px;color:#64748b;">Please keep the reference [${escapeHtml(
             reference,

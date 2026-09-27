@@ -1,6 +1,6 @@
 import { prisma } from '../prisma';
 import { extractRfqReferences } from '../rfq-reference';
-import { GraphError, graphFetch, mailboxPath } from './graph-client';
+import { GraphError, graphEnv, graphFetch, graphMailbox, mailboxPath } from './graph-client';
 import { processInboundMessage } from './rfq-inbound';
 
 const SUBSCRIPTION_TTL_MINUTES = 4200; // under the 10080-minute Graph max for mail
@@ -11,13 +11,14 @@ const SYNC_MAX_MESSAGES = 200;
 const SYNC_TIME_BUDGET_MS = 18 * 1000; // stay under the route's maxDuration
 
 function inboxResource(): string {
-  return `users/${process.env.MICROSOFT_MAILBOX}/mailFolders('Inbox')/messages`;
+  // Graph resource strings are NOT URL-encoded.
+  return `users/${graphMailbox()}/mailFolders('Inbox')/messages`;
 }
 
 function notificationUrl(): string {
   return (
-    process.env.MICROSOFT_WEBHOOK_URL ||
-    `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/microsoft-graph`
+    graphEnv('MICROSOFT_WEBHOOK_URL') ||
+    `${graphEnv('NEXT_PUBLIC_APP_URL')}/api/webhooks/microsoft-graph`
   );
 }
 
@@ -27,11 +28,11 @@ function notificationUrl(): string {
  * notification would be dropped on arrival.
  */
 export function webhookConfigError(): string | null {
-  const clientState = process.env.MICROSOFT_WEBHOOK_CLIENT_STATE;
+  const clientState = graphEnv('MICROSOFT_WEBHOOK_CLIENT_STATE');
   if (!clientState || clientState.length < 32) {
     return 'MICROSOFT_WEBHOOK_CLIENT_STATE is not configured';
   }
-  if (!process.env.MICROSOFT_WEBHOOK_URL && !process.env.NEXT_PUBLIC_APP_URL) {
+  if (!graphEnv('MICROSOFT_WEBHOOK_URL') && !graphEnv('NEXT_PUBLIC_APP_URL')) {
     return 'MICROSOFT_WEBHOOK_URL or NEXT_PUBLIC_APP_URL is not configured';
   }
   return null;
@@ -50,7 +51,7 @@ async function createSubscription() {
         notificationUrl: notificationUrl(),
         resource: inboxResource(),
         expirationDateTime,
-        clientState: process.env.MICROSOFT_WEBHOOK_CLIENT_STATE,
+        clientState: graphEnv('MICROSOFT_WEBHOOK_CLIENT_STATE'),
       }),
     })
   ).json();

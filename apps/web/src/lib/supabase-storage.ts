@@ -35,10 +35,14 @@ export async function createAttachmentUploadUrl(path: string) {
   return { signedUrl: data.signedUrl, token: data.token, path: data.path };
 }
 
-export async function createAttachmentDownloadUrl(path: string, fileName?: string) {
+export async function createAttachmentDownloadUrl(
+  path: string,
+  fileName?: string,
+  expiresInSeconds = 300,
+) {
   const { data, error } = await getSupabaseClient()
     .storage.from(RFQ_ATTACHMENTS_BUCKET)
-    .createSignedUrl(path, 300, fileName ? { download: fileName } : undefined);
+    .createSignedUrl(path, expiresInSeconds, fileName ? { download: fileName } : undefined);
   if (error || !data) {
     throw new Error(error?.message || 'Failed to create signed download URL');
   }

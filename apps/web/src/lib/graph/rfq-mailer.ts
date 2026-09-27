@@ -1,17 +1,22 @@
 import { prisma } from '../prisma';
-import { downloadAttachment } from '../supabase-storage';
+import { createAttachmentDownloadUrl, downloadAttachment } from '../supabase-storage';
 import type { RfqRequestPayload } from '../rfq-payload';
 import {
   GRAPH_NOT_CONFIGURED_MESSAGE,
   GraphError,
   graphFetch,
+  graphMailbox,
   isGraphConfigured,
   mailboxPath,
 } from './graph-client';
 import { renderRfqEmail } from './rfq-email';
 
-const SMALL_ATTACHMENT_LIMIT = 3 * 1024 * 1024; // 3 MB — Graph inline attachment cap
-const UPLOAD_CHUNK_BYTES = 3_276_800; // 3.125 MiB — multiple of 320 KiB as Graph requires
+// sendMail request bodies are capped at ~4 MB after base64 encoding — keep
+// the cumulative raw-byte budget under that and link the rest via Supabase.
+const INLINE_ATTACHMENT_BUDGET = 2.8 * 1024 * 1024;
+const LARGE_ATTACHMENT_LINK_SECONDS = 14 * 24 * 3600; // 14 days
+const SENT_LOOKUP_ATTEMPTS = 3;
+const SENT_LOOKUP_DELAY_MS = 1500;
 
 export function htmlToText(html: string): string {
   return html
@@ -47,10 +52,12 @@ async function markFailed(rfqId: string, message: string) {
 }
 
 /**
- * Sends the RFQ email through the shared Microsoft 365 mailbox:
- * creates a draft, pushes attachments, sends, then records an OUTBOUND
+ * Sends the RFQ email through the shared Microsoft 365 mailbox with a single
+ * `sendMail` call (Mail.Send only — no draft round-trips, which would need
+ * Mail.ReadWrite). Small attachments ride inline; larger ones become signed
+ * Supabase download links inside the email body. Then records an OUTBOUND
  * RFQMessage. Never throws — returns { ok, error? } and flips the RFQ's
- * emailStatus to FAILED on error (deleting the draft best-effort).
+ * emailStatus to FAILED on error.
  */
 export async function sendRfqEmail(rfqId: string): Promise<{ ok: boolean; error?: string }> {
   const rfq = await prisma.rFQ.findUnique({
@@ -66,7 +73,6 @@ export async function sendRfqEmail(rfqId: string): Promise<{ ok: boolean; error?
     return { ok: false, error: GRAPH_NOT_CONFIGURED_MESSAGE };
   }
 
-  let draftId: string | null = null;
   try {
     if (!rfq.externalContactEmail) {
       throw new Error('RFQ has no recipient email');
@@ -84,17 +90,51 @@ export async function sendRfqEmail(rfqId: string): Promise<{ ok: boolean; error?
       data: { emailStatus: 'QUEUED', emailAttempts: { increment: 1 } },
     });
 
+    // Resolve attachments before rendering so the email body can list real
+    // attachments and download links separately.
+    const attachments: {
+      '@odata.type': string;
+      name: string;
+      contentType: string;
+      contentBytes: string;
+    }[] = [];
+    const attachmentLinks: { fileName: string; url: string }[] = [];
+    let inlineBytes = 0;
+    for (const attachment of rfq.attachments) {
+      const bytes = await downloadAttachment(attachment.storagePath);
+      if (inlineBytes + bytes.length <= INLINE_ATTACHMENT_BUDGET) {
+        inlineBytes += bytes.length;
+        attachments.push({
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: attachment.fileName,
+          contentType: attachment.mimeType || 'application/octet-stream',
+          contentBytes: bytes.toString('base64'),
+        });
+      } else {
+        const url = await createAttachmentDownloadUrl(
+          attachment.storagePath,
+          attachment.fileName,
+          LARGE_ATTACHMENT_LINK_SECONDS,
+        );
+        attachmentLinks.push({ fileName: attachment.fileName, url });
+      }
+    }
+
     const { subject, html } = renderRfqEmail({
       reference: rfq.reference,
       payload,
-      attachmentNames: rfq.attachments.map((a) => a.fileName),
+      attachmentNames: attachments.map((a) => a.name),
+      attachmentLinks,
     });
 
-    const draft = await (
-      await graphFetch(`${mailboxPath()}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+    // sendMail (Mail.Send) — the reference also rides as an internet header
+    // so replies keep it even if the supplier edits the subject line.
+    const sendStartedAt = Date.now();
+    await graphFetch(`${mailboxPath()}/sendMail`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: {
           subject,
           body: { contentType: 'HTML', content: html },
           toRecipients: [
@@ -105,104 +145,76 @@ export async function sendRfqEmail(rfqId: string): Promise<{ ok: boolean; error?
               },
             },
           ],
-        }),
-      })
-    ).json();
-    draftId = draft.id;
+          internetMessageHeaders: [
+            { name: 'X-XprocurAi-RFQ-Reference', value: rfq.reference },
+          ],
+          attachments,
+        },
+        saveToSentItems: true,
+      }),
+    });
 
-    for (const attachment of rfq.attachments) {
-      const bytes = await downloadAttachment(attachment.storagePath);
-      if (bytes.length < SMALL_ATTACHMENT_LIMIT) {
-        await graphFetch(`${mailboxPath()}/messages/${encodeURIComponent(draftId!)}/attachments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            '@odata.type': '#microsoft.graph.fileAttachment',
-            name: attachment.fileName,
-            contentType: attachment.mimeType || 'application/octet-stream',
-            contentBytes: bytes.toString('base64'),
-          }),
-        });
-      } else {
-        const session = await (
+    // sendMail returns no ids — best-effort lookup of the just-sent message
+    // in Sent Items (Mail.Read) to capture conversation/internetMessageId.
+    // Failures here must NOT flip the RFQ to FAILED: the email was sent.
+    let found: {
+      id?: string;
+      subject?: string;
+      conversationId?: string;
+      internetMessageId?: string;
+      sentDateTime?: string;
+    } | null = null;
+    const sentSince = new Date(sendStartedAt - 60_000).toISOString();
+    for (let attempt = 0; attempt < SENT_LOOKUP_ATTEMPTS; attempt += 1) {
+      try {
+        const page = await (
           await graphFetch(
-            `${mailboxPath()}/messages/${encodeURIComponent(draftId!)}/attachments/createUploadSession`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                AttachmentItem: {
-                  attachmentType: 'file',
-                  name: attachment.fileName,
-                  size: bytes.length,
-                  contentType: attachment.mimeType || 'application/octet-stream',
-                },
-              }),
-            },
+            `${mailboxPath()}/mailFolders('SentItems')/messages?$filter=${encodeURIComponent(
+              `sentDateTime ge ${sentSince}`,
+            )}&$orderby=sentDateTime desc&$top=25&$select=id,subject,conversationId,internetMessageId,sentDateTime`,
           )
         ).json();
-        const uploadUrl = session.uploadUrl;
-        for (let start = 0; start < bytes.length; start += UPLOAD_CHUNK_BYTES) {
-          const end = Math.min(start + UPLOAD_CHUNK_BYTES, bytes.length) - 1;
-          const chunk = bytes.subarray(start, end + 1);
-          // DOM BodyInit rejects Buffer<ArrayBufferLike> — copy into a view
-          // backed by a real ArrayBuffer.
-          const body = new Uint8Array(new ArrayBuffer(chunk.byteLength));
-          body.set(chunk);
-          const res = await fetch(uploadUrl, {
-            method: 'PUT',
-            // No Authorization header — the upload session URL is pre-authenticated.
-            headers: {
-              'Content-Range': `bytes ${start}-${end}/${bytes.length}`,
-              'Content-Length': String(body.length),
-            },
-            body,
-          });
-          if (!res.ok) {
-            throw new Error(`Attachment upload failed for ${attachment.fileName} (${res.status})`);
-          }
-        }
+        found =
+          (page?.value || []).find(
+            (m: { subject?: string }) =>
+              typeof m?.subject === 'string' && m.subject.includes(`[${rfq.reference}]`),
+          ) ?? null;
+        if (found) break;
+      } catch (err) {
+        console.warn('[rfq-mailer] Sent Items lookup failed (non-fatal):', err);
+        break;
+      }
+      if (attempt < SENT_LOOKUP_ATTEMPTS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, SENT_LOOKUP_DELAY_MS));
       }
     }
 
-    await graphFetch(`${mailboxPath()}/messages/${encodeURIComponent(draftId!)}/send`, { method: 'POST' });
-
-    // ImmutableId survives the Drafts → Sent Items move; refresh best-effort.
-    let sentMessage = draft;
-    try {
-      sentMessage = await (
-        await graphFetch(
-          `${mailboxPath()}/messages/${encodeURIComponent(draftId!)}?$select=id,conversationId,internetMessageId,sentDateTime`,
-        )
-      ).json();
-    } catch {
-      // message may already have moved — keep draft ids
-    }
-
-    const sentAt = sentMessage?.sentDateTime ? new Date(sentMessage.sentDateTime) : new Date();
+    const sentAt = found?.sentDateTime ? new Date(found.sentDateTime) : new Date();
     await prisma.rFQ.update({
       where: { id: rfq.id },
       data: {
         emailStatus: 'WAITING_REPLY',
         emailSentAt: sentAt,
         emailError: null,
-        graphMessageId: sentMessage?.id || draftId,
-        graphInternetMessageId:
-          sentMessage?.internetMessageId || draft.internetMessageId || null,
-        graphConversationId: sentMessage?.conversationId || draft.conversationId || null,
+        graphMessageId: found?.id ?? null,
+        graphInternetMessageId: found?.internetMessageId ?? null,
+        graphConversationId: found?.conversationId ?? null,
         sentVia: 'EMAIL',
       },
     });
 
+    // The outbound-${rfq.id} fallback key keeps the message row stable across
+    // retries even when the Sent Items lookup found nothing.
+    const outboundKey = found?.id ?? `outbound-${rfq.id}`;
     const messageData = {
       rfqId: rfq.id,
       userId: rfq.userId,
       direction: 'OUTBOUND' as const,
       kind: 'RFQ_REQUEST' as const,
-      internetMessageId: sentMessage?.internetMessageId || draft.internetMessageId || null,
-      conversationId: sentMessage?.conversationId || draft.conversationId || null,
+      internetMessageId: found?.internetMessageId ?? null,
+      conversationId: found?.conversationId ?? null,
       subject,
-      fromEmail: process.env.MICROSOFT_MAILBOX!,
+      fromEmail: graphMailbox(),
       fromName: 'XprocurAi',
       toRecipients: [
         {
@@ -216,8 +228,8 @@ export async function sendRfqEmail(rfqId: string): Promise<{ ok: boolean; error?
       hasAttachments: rfq.attachments.length > 0,
     };
     await prisma.rFQMessage.upsert({
-      where: { graphMessageId: sentMessage?.id || draftId! },
-      create: { ...messageData, graphMessageId: sentMessage?.id || draftId! },
+      where: { graphMessageId: outboundKey },
+      create: { ...messageData, graphMessageId: outboundKey },
       update: messageData,
     });
 
@@ -228,13 +240,6 @@ export async function sendRfqEmail(rfqId: string): Promise<{ ok: boolean; error?
       await markFailed(rfqId, message);
     } catch (markErr) {
       console.error('[rfq-mailer] failed to mark RFQ FAILED:', markErr);
-    }
-    if (draftId) {
-      try {
-        await graphFetch(`${mailboxPath()}/messages/${encodeURIComponent(draftId)}`, { method: 'DELETE' });
-      } catch {
-        // best-effort draft cleanup
-      }
     }
     console.error('[rfq-mailer] send failed:', message);
     return { ok: false, error: message };

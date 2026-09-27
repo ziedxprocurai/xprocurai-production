@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'crypto';
 import type { NextRequest } from 'next/server';
 import { processInboundMessage } from '@/lib/graph/rfq-inbound';
-import { isGraphConfigured } from '@/lib/graph/graph-client';
+import { graphEnv, isGraphConfigured } from '@/lib/graph/graph-client';
 
 export const runtime = 'nodejs';
 
@@ -22,7 +22,7 @@ async function handle(req: NextRequest) {
     });
   }
 
-  const expectedClientState = process.env.MICROSOFT_WEBHOOK_CLIENT_STATE;
+  const expectedClientState = graphEnv('MICROSOFT_WEBHOOK_CLIENT_STATE');
 
   try {
     const body = await req.json().catch(() => ({}));

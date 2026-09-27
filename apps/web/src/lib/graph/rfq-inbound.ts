@@ -1,6 +1,12 @@
 import { prisma } from '../prisma';
 import { extractRfqReferences } from '../rfq-reference';
-import { GraphError, graphFetch, isGraphConfigured, mailboxPath } from './graph-client';
+import {
+  GraphError,
+  graphFetch,
+  graphMailbox,
+  isGraphConfigured,
+  mailboxPath,
+} from './graph-client';
 import { htmlToText } from './rfq-mailer';
 
 export type InboundMessageKind = 'REPLY' | 'AUTO_REPLY' | 'BOUNCE';
@@ -130,7 +136,7 @@ export async function processInboundMessage(graphMessageId: string): Promise<voi
     .then((r) => r.json())
     .catch(() => null);
 
-  const mailbox = (process.env.MICROSOFT_MAILBOX || '').toLowerCase();
+  const mailbox = graphMailbox().toLowerCase();
   const fromAddress = (msg?.from?.emailAddress?.address ||
     msg?.sender?.emailAddress?.address ||
     '') as string;
