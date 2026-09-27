@@ -4,10 +4,14 @@
 // shared CRON_SECRET. No imports — plain fetch only.
 
 export default async () => {
-  const baseUrl = process.env.URL;
-  const cronSecret = process.env.CRON_SECRET;
+  const baseUrl = (process.env.URL || process.env.NEXT_PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
+  const cronSecret = (process.env.CRON_SECRET || '').trim();
   if (!baseUrl || !cronSecret) {
-    console.log('[graph-maintenance] URL or CRON_SECRET not configured — skipping');
+    console.log(
+      `[graph-maintenance] skipping — missing: ${[!baseUrl && 'URL/NEXT_PUBLIC_APP_URL', !cronSecret && 'CRON_SECRET']
+        .filter(Boolean)
+        .join(', ')}`,
+    );
     return new Response('ok');
   }
 
@@ -16,7 +20,8 @@ export default async () => {
       method: 'POST',
       headers: { Authorization: `Bearer ${cronSecret}` },
     });
-    console.log(`[graph-maintenance] status ${res.status}`);
+    const body = await res.text().catch(() => '');
+    console.log(`[graph-maintenance] status ${res.status} ${body.slice(0, 500)}`);
   } catch (err) {
     console.error('[graph-maintenance] request failed:', err);
   }
