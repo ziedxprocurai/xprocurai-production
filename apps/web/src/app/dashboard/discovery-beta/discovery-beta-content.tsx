@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, FormEvent, useCallback } from 'react';
+import { useEffect, useState, FormEvent, useCallback, useRef } from 'react';
 import {
   Search,
   Users,
@@ -25,8 +25,20 @@ import {
   ShieldCheck,
   AlertTriangle,
   ShieldAlert,
+  Upload,
+  FileText,
 } from 'lucide-react';
 import { getRecentLeadCompanies, pushRecentLeadCompany, type RecentLeadCompany } from '@/lib/recent-lead-companies';
+import {
+  ALLOWED_RFQ_ATTACHMENT_EXTENSIONS,
+  MAX_RFQ_ATTACHMENT_BYTES,
+  MAX_RFQ_ATTACHMENTS,
+  RFQ_CATEGORIES,
+  UNIT_OF_MEASURE_OPTIONS,
+  formatFileSize,
+  getFileExtension,
+  type RFQUnitOfMeasureValue,
+} from '@/lib/rfq-constants';
 
 type Tab = 'companies' | 'people';
 
@@ -192,9 +204,17 @@ export function DiscoveryBetaContent() {
 
   const [showRfqModal, setShowRfqModal] = useState(false);
   const [rfqTitle, setRfqTitle] = useState('');
-  const [rfqDescription, setRfqDescription] = useState('');
+  const [rfqCategory, setRfqCategory] = useState('');
+  const [rfqItemName, setRfqItemName] = useState('');
+  const [rfqSpecifications, setRfqSpecifications] = useState('');
   const [rfqQuantity, setRfqQuantity] = useState(1);
+  const [rfqUnit, setRfqUnit] = useState<RFQUnitOfMeasureValue>('PIECE');
+  const [rfqFiles, setRfqFiles] = useState<File[]>([]);
+  const [rfqFileError, setRfqFileError] = useState('');
+  const [rfqDragActive, setRfqDragActive] = useState(false);
+  const rfqFileInputRef = useRef<HTMLInputElement>(null);
   const [submittingRfq, setSubmittingRfq] = useState(false);
+  const [rfqPhase, setRfqPhase] = useState<'idle' | 'uploading' | 'sending'>('idle');
   const [rfqError, setRfqError] = useState('');
   const [rfqSuccess, setRfqSuccess] = useState('');
 
@@ -362,17 +382,58 @@ export function DiscoveryBetaContent() {
   }
 
   function openRfqModal() {
-    setRfqTitle(`RFQ for ${selectedIds.size} potential supplier${selectedIds.size === 1 ? '' : 's'}`);
-    setRfqDescription('');
+    setRfqTitle('');
+    setRfqCategory('');
+    setRfqItemName('');
+    setRfqSpecifications('');
     setRfqQuantity(1);
+    setRfqUnit('PIECE');
+    setRfqFiles([]);
+    setRfqFileError('');
+    setRfqDragActive(false);
+    setRfqPhase('idle');
     setRfqError('');
     setRfqSuccess('');
     setShowRfqModal(true);
   }
 
+  function addRfqFiles(fileList: FileList | File[]) {
+    const incoming = Array.from(fileList);
+    const next = [...rfqFiles];
+    const rejected: string[] = [];
+    for (const file of incoming) {
+      const extension = getFileExtension(file.name);
+      if (
+        !extension ||
+        !(ALLOWED_RFQ_ATTACHMENT_EXTENSIONS as readonly string[]).includes(extension)
+      ) {
+        rejected.push(`${file.name}: unsupported file type`);
+        continue;
+      }
+      if (file.size <= 0 || file.size > MAX_RFQ_ATTACHMENT_BYTES) {
+        rejected.push(`${file.name}: exceeds the ${formatFileSize(MAX_RFQ_ATTACHMENT_BYTES)} limit`);
+        continue;
+      }
+      if (next.some((f) => f.name === file.name && f.size === file.size)) continue;
+      next.push(file);
+    }
+    if (next.length > MAX_RFQ_ATTACHMENTS) {
+      next.length = MAX_RFQ_ATTACHMENTS;
+      rejected.push(`Maximum ${MAX_RFQ_ATTACHMENTS} attachments per RFQ`);
+    }
+    setRfqFiles(next);
+    setRfqFileError(rejected.join(' · '));
+  }
+
+  function removeRfqFile(index: number) {
+    setRfqFiles((prev) => prev.filter((_, i) => i !== index));
+    setRfqFileError('');
+  }
+
   async function submitRfq(e: FormEvent) {
     e.preventDefault();
     setSubmittingRfq(true);
+    setRfqPhase('idle');
     setRfqError('');
     const targets = Array.from(selectedIds);
     const stillLoading = targets.some((id) => contacts[id]?.loading);
@@ -394,6 +455,66 @@ export function DiscoveryBetaContent() {
     const batchId = crypto.randomUUID();
 
     try {
+      // Attachments are uploaded straight to Supabase Storage through signed
+      // URLs — file bytes never transit the API (Netlify caps bodies ~6 MB).
+      // Any upload failure aborts before a single RFQ row is created.
+      let attachments: {
+        path: string;
+        fileName: string;
+        fileSize: number;
+        mimeType: string | null;
+      }[] = [];
+      if (rfqFiles.length > 0) {
+        setRfqPhase('uploading');
+        const urlsRes = await fetch('/api/rfqs/attachments/upload-urls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            batchId,
+            files: rfqFiles.map((f) => ({ name: f.name, size: f.size, type: f.type })),
+          }),
+        });
+        const urlsData = await urlsRes.json().catch(() => ({}));
+        if (!urlsRes.ok) {
+          throw new Error(urlsData?.message || 'Failed to prepare attachment uploads');
+        }
+        const uploads = (urlsData.uploads || []) as {
+          path: string;
+          signedUrl: string;
+          token: string;
+          fileName: string;
+          fileSize: number;
+          mimeType: string | null;
+        }[];
+        for (let i = 0; i < uploads.length; i += 1) {
+          const file = rfqFiles[i];
+          const upload = uploads[i];
+          if (!file || !upload) throw new Error('Attachment upload mapping failed');
+          // Mirrors @supabase/storage-js uploadToSignedUrl() for Blob/File
+          // bodies: PUT to the signed URL with a FormData payload
+          // (cacheControl field + file under an empty field name) and the
+          // x-upsert header. See StorageFileApi.ts in node_modules.
+          const formData = new FormData();
+          formData.append('cacheControl', '3600');
+          formData.append('', file);
+          const putRes = await fetch(upload.signedUrl, {
+            method: 'PUT',
+            headers: { 'x-upsert': 'false' },
+            body: formData,
+          });
+          if (!putRes.ok) {
+            throw new Error(`Failed to upload attachment: ${file.name}`);
+          }
+        }
+        attachments = uploads.map(({ path, fileName, fileSize, mimeType }) => ({
+          path,
+          fileName,
+          fileSize,
+          mimeType,
+        }));
+        setRfqPhase('sending');
+      }
+
       const results = await Promise.allSettled(
         targets.map((id) => {
           const company = selectedMeta[id];
@@ -403,8 +524,12 @@ export function DiscoveryBetaContent() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               title: rfqTitle,
-              description: rfqDescription,
+              description: rfqSpecifications,
+              category: rfqCategory,
+              itemName: rfqItemName,
               quantity: rfqQuantity,
+              unitOfMeasure: rfqUnit,
+              attachments,
               isExternal: true,
               leadCompanyId: id,
               externalCompanyName: company?.name,
@@ -453,6 +578,7 @@ export function DiscoveryBetaContent() {
       setRfqError(err instanceof Error ? err.message : 'Unable to connect to the server');
     } finally {
       setSubmittingRfq(false);
+      setRfqPhase('idle');
     }
   }
 
@@ -979,7 +1105,7 @@ export function DiscoveryBetaContent() {
       {/* RFQ modal */}
       {showRfqModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-xl">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-xl">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold text-[hsl(var(--foreground))]">Request a Quote</h2>
               <button onClick={() => setShowRfqModal(false)} className="rounded-lg p-1 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]">
@@ -1024,15 +1150,158 @@ export function DiscoveryBetaContent() {
             <form onSubmit={submitRfq} className="space-y-4">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">RFQ Title *</label>
-                <input required value={rfqTitle} onChange={(e) => setRfqTitle(e.target.value)} className="input-field" />
+                <input
+                  required
+                  value={rfqTitle}
+                  onChange={(e) => setRfqTitle(e.target.value)}
+                  className="input-field"
+                  placeholder="e.g. Achat Cartons Emballage Q3"
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                    Category / Famille d&apos;achat *
+                  </label>
+                  <select
+                    required
+                    value={rfqCategory}
+                    onChange={(e) => setRfqCategory(e.target.value)}
+                    className="input-field"
+                  >
+                    <option value="" disabled>
+                      Select a category
+                    </option>
+                    {RFQ_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                    Item / Service Name *
+                  </label>
+                  <input
+                    required
+                    value={rfqItemName}
+                    onChange={(e) => setRfqItemName(e.target.value)}
+                    className="input-field"
+                    placeholder="e.g. Cartons Kraft 60x40x40"
+                  />
+                </div>
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">Description</label>
-                <textarea value={rfqDescription} onChange={(e) => setRfqDescription(e.target.value)} rows={4} className="input-field" placeholder="Provide additional details about your requirements..." />
+                <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                  Detailed Specifications
+                </label>
+                <textarea
+                  value={rfqSpecifications}
+                  onChange={(e) => setRfqSpecifications(e.target.value)}
+                  rows={6}
+                  className="input-field"
+                  placeholder="Dimensions, materials, standards, tolerances, packaging, delivery constraints..."
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">Quantity *</label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    step={1}
+                    value={rfqQuantity}
+                    onChange={(e) => setRfqQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                    Unit of Measure / Unité *
+                  </label>
+                  <select
+                    required
+                    value={rfqUnit}
+                    onChange={(e) => setRfqUnit(e.target.value as RFQUnitOfMeasureValue)}
+                    className="input-field"
+                  >
+                    {UNIT_OF_MEASURE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">Quantity *</label>
-                <input type="number" required min={1} value={rfqQuantity} onChange={(e) => setRfqQuantity(parseInt(e.target.value) || 1)} className="input-field" />
+                <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">Attachments</label>
+                <div
+                  onClick={() => rfqFileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setRfqDragActive(true);
+                  }}
+                  onDragLeave={() => setRfqDragActive(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setRfqDragActive(false);
+                    if (e.dataTransfer.files.length > 0) addRfqFiles(e.dataTransfer.files);
+                  }}
+                  className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
+                    rfqDragActive
+                      ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/5'
+                      : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/50 hover:bg-[hsl(var(--muted))]/30'
+                  }`}
+                >
+                  <Upload className="h-6 w-6 text-[hsl(var(--muted-foreground))]" />
+                  <p className="text-sm text-[hsl(var(--foreground))]">
+                    Drop files here or <span className="font-medium text-[hsl(var(--primary))]">browse</span>
+                  </p>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    Up to {MAX_RFQ_ATTACHMENTS} files · {formatFileSize(MAX_RFQ_ATTACHMENT_BYTES)} each · PDF,
+                    Office documents, images, CAD (DWG, DXF, STEP, IGES), ZIP
+                  </p>
+                </div>
+                <input
+                  ref={rfqFileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  accept={ALLOWED_RFQ_ATTACHMENT_EXTENSIONS.map((ext) => `.${ext}`).join(',')}
+                  onChange={(e) => {
+                    if (e.target.files?.length) addRfqFiles(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+                {rfqFiles.length > 0 && (
+                  <ul className="mt-2 space-y-1.5">
+                    {rfqFiles.map((file, index) => (
+                      <li
+                        key={`${file.name}-${file.size}-${index}`}
+                        className="flex items-center gap-2 rounded-lg border border-[hsl(var(--border))] px-3 py-2"
+                      >
+                        <FileText className="h-4 w-4 shrink-0 text-[hsl(var(--muted-foreground))]" />
+                        <span className="min-w-0 flex-1 truncate text-sm text-[hsl(var(--foreground))]">
+                          {file.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-[hsl(var(--muted-foreground))]">
+                          {formatFileSize(file.size)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeRfqFile(index)}
+                          className="rounded-md p-1 text-[hsl(var(--muted-foreground))] transition-colors hover:bg-red-500/10 hover:text-red-500"
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {rfqFileError && <p className="mt-2 text-xs text-red-500">{rfqFileError}</p>}
               </div>
 
               {rfqError && (
@@ -1057,7 +1326,11 @@ export function DiscoveryBetaContent() {
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
                 >
                   {submittingRfq ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Send {selectedList.length} RFQ{selectedList.length === 1 ? '' : 's'}
+                  {submittingRfq
+                    ? rfqPhase === 'uploading'
+                      ? 'Uploading attachments…'
+                      : 'Sending…'
+                    : `Send ${selectedList.length} RFQ${selectedList.length === 1 ? '' : 's'}`}
                 </button>
               </div>
             </form>

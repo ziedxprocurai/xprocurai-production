@@ -24,6 +24,9 @@ model User {
   companyId    String?      @map("company_id")
   company      Company?     @relation(fields: [companyId], references: [id])
   scraperJobs  ScraperJob[]
+
+  uploadedRfqAttachments RFQAttachment[] @relation("RFQAttachmentUploader")
+  recordedRfqQuotes      RFQQuote[]      @relation("RFQQuoteRecorder")
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
 
@@ -142,11 +145,14 @@ model ERPConnection {
 }
 
 model RFQ {
-  id          String    @id @default(cuid())
-  title       String
-  description String?
-  quantity    Int?
-  status      RFQStatus @default(PENDING)
+  id            String            @id @default(cuid())
+  title         String
+  description   String?
+  category      String?
+  itemName      String?           @map("item_name")
+  quantity      Int?
+  unitOfMeasure RFQUnitOfMeasure? @map("unit_of_measure")
+  status        RFQStatus         @default(PENDING)
   buyerId     String    @map("buyer_id")
   buyer       Company   @relation("BuyerRFQs", fields: [buyerId], references: [id], onDelete: Cascade)
   supplierId  String?   @map("supplier_id")
@@ -179,12 +185,70 @@ model RFQ {
   // single-target RFQs (e.g. the existing Suppliers page flow).
   batchId String? @map("batch_id")
 
+  attachments RFQAttachment[]
+  quote       RFQQuote?
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([leadCompanyId])
   @@index([batchId])
   @@map("rfqs")
+  @@schema("public")
+}
+
+enum RFQUnitOfMeasure {
+  PIECE
+  KG
+  TONNE
+  METRE
+  LITRE
+  PALETTE
+  HOUR
+  FLAT_RATE
+
+  @@schema("public")
+}
+
+model RFQAttachment {
+  id            String   @id @default(cuid())
+  rfqId         String   @map("rfq_id")
+  rfq           RFQ      @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  storageBucket String   @default("rfq-attachments") @map("storage_bucket")
+  storagePath   String   @map("storage_path")
+  fileName      String   @map("file_name")
+  fileSize      Int      @map("file_size")
+  mimeType      String?  @map("mime_type")
+  uploadedById  String?  @map("uploaded_by_id")
+  uploadedBy    User?    @relation("RFQAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([rfqId])
+  @@index([storagePath])
+  @@map("rfq_attachments")
+  @@schema("public")
+}
+
+model RFQQuote {
+  id               String   @id @default(cuid())
+  rfqId            String   @unique @map("rfq_id")
+  rfq              RFQ      @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplierName     String   @map("supplier_name")
+  unitPrice        Decimal  @map("unit_price") @db.Decimal(14, 4)
+  totalPrice       Decimal  @map("total_price") @db.Decimal(16, 2)
+  currency         String   @db.VarChar(3)
+  deliveryTimeDays Int?     @map("delivery_time_days")
+  leadTimeDays     Int?     @map("lead_time_days")
+  paymentTerms     String?  @map("payment_terms")
+  certifications   String[] @default([])
+  validUntil       DateTime? @map("valid_until") @db.Date
+  notes            String?
+  recordedById     String?  @map("recorded_by_id")
+  recordedBy       User?    @relation("RFQQuoteRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("rfq_quotes")
   @@schema("public")
 }
 

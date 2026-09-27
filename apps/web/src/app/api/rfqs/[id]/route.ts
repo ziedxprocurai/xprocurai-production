@@ -48,6 +48,16 @@ export async function PATCH(
         buyer: { select: { id: true, legalName: true } },
         supplier: { select: { id: true, legalName: true } },
         product: { select: { id: true, name: true } },
+        attachments: {
+          select: {
+            id: true,
+            fileName: true,
+            fileSize: true,
+            mimeType: true,
+            createdAt: true,
+          },
+        },
+        quote: true,
       },
     });
 

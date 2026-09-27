@@ -19,13 +19,56 @@ import {
   Mail,
   Phone,
   Radar,
+  Paperclip,
+  ChevronDown,
+  ChevronUp,
+  Pencil,
+  Plus,
+  Tag,
 } from 'lucide-react';
+import {
+  PAYMENT_TERMS_SUGGESTIONS,
+  QUOTE_CURRENCIES,
+  formatFileSize,
+  unitLabel,
+} from '@/lib/rfq-constants';
+
+interface RFQAttachmentItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  mimeType?: string | null;
+  createdAt?: string;
+}
+
+// Prisma Decimal fields serialize to strings in JSON — always Number() them
+// before arithmetic or formatting.
+interface RFQQuote {
+  id: string;
+  supplierName: string;
+  unitPrice: string | number;
+  totalPrice: string | number;
+  currency: string;
+  deliveryTimeDays?: number | null;
+  leadTimeDays?: number | null;
+  paymentTerms?: string | null;
+  certifications?: string[];
+  validUntil?: string | null;
+  notes?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 interface RFQ {
   id: string;
   title: string;
   description?: string;
+  category?: string | null;
+  itemName?: string | null;
   quantity: number;
+  unitOfMeasure?: string | null;
+  attachments?: RFQAttachmentItem[];
+  quote?: RFQQuote | null;
   status: 'PENDING' | 'REVIEWED' | 'RESPONDED' | 'ACCEPTED' | 'REJECTED';
   response?: string;
   createdAt: string;
@@ -65,6 +108,34 @@ interface RFQ {
 function supplierName(rfq: RFQ, activeTab: 'sent' | 'received') {
   if (rfq.isExternal) return rfq.externalCompanyName || 'External lead';
   return activeTab === 'sent' ? rfq.supplier?.legalName : rfq.buyer?.legalName;
+}
+
+/** "Qty: 500 Kg" — falls back to the bare quantity for older RFQs with no unit. */
+function quantityLabel(rfq: RFQ, prefix = 'Qty') {
+  const unit = unitLabel(rfq.unitOfMeasure);
+  return `${prefix}: ${rfq.quantity ?? '—'}${unit ? ` ${unit}` : ''}`;
+}
+
+function formatQuoteAmount(amount: string | number | null | undefined, currency?: string | null) {
+  const value = Number(amount);
+  if (!Number.isFinite(value)) return '—';
+  try {
+    return new Intl.NumberFormat('fr-TN', {
+      style: 'currency',
+      currency: currency || 'TND',
+    }).format(value);
+  } catch {
+    return `${value.toLocaleString()} ${currency || ''}`.trim();
+  }
+}
+
+function isQuoteExpired(quote?: RFQQuote | null) {
+  if (!quote?.validUntil) return false;
+  const end = new Date(quote.validUntil);
+  if (Number.isNaN(end.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return end < today;
 }
 
 interface RFQGroup {
@@ -136,6 +207,9 @@ export function RFQsContent() {
 
   const isBuyer = company?.roles?.includes('BUYER');
   const isSupplier = company?.roles?.includes('SUPPLIER');
+  // Buyers record quotes received offline for RFQs they sent; onboarded
+  // suppliers may record the quote they returned on RFQs they received.
+  const canRecordQuote = activeTab === 'sent' ? !!isBuyer : !!isSupplier;
 
   useEffect(() => {
     fetchCompanyAndRFQs();
@@ -225,6 +299,12 @@ export function RFQsContent() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleQuoteSaved(updated: RFQ) {
+    setSentRFQs((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    setReceivedRFQs((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    setSelectedRFQ(updated);
   }
 
   const currentRFQs = activeTab === 'sent' ? sentRFQs : receivedRFQs;
@@ -326,7 +406,7 @@ export function RFQsContent() {
         {/* Detail Modal */}
         {showDetailModal && selectedRFQ && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-full max-w-2xl rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-xl">
+            <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-xl">
               <div className="mb-6 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-[hsl(var(--foreground))]">RFQ Details</h2>
                 <button
@@ -351,11 +431,30 @@ export function RFQsContent() {
 
                 {/* RFQ Information */}
                 <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 p-4">
-                  <h3 className="mb-3 font-semibold text-[hsl(var(--foreground))]">{selectedRFQ.title}</h3>
-                  {selectedRFQ.description && (
-                    <p className="mb-3 text-sm text-[hsl(var(--muted-foreground))]">
-                      {selectedRFQ.description}
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold text-[hsl(var(--foreground))]">{selectedRFQ.title}</h3>
+                    {selectedRFQ.category && (
+                      <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2.5 py-0.5 text-[11px] font-medium text-[hsl(var(--muted-foreground))]">
+                        {selectedRFQ.category}
+                      </span>
+                    )}
+                  </div>
+                  {selectedRFQ.itemName && (
+                    <p className="mb-3 text-sm font-medium text-[hsl(var(--foreground))]">
+                      {selectedRFQ.itemName}
                     </p>
+                  )}
+                  {selectedRFQ.description && (
+                    <div className="mb-3">
+                      {selectedRFQ.itemName && (
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+                          Specifications
+                        </p>
+                      )}
+                      <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                        {selectedRFQ.description}
+                      </p>
+                    </div>
                   )}
                   <div className="grid gap-2 text-sm">
                     {selectedRFQ.product && (
@@ -369,7 +468,10 @@ export function RFQsContent() {
                     )}
                     <div className="flex items-center gap-2">
                       <span className="font-medium">Quantity:</span>
-                      <span className="text-[hsl(var(--muted-foreground))]">{selectedRFQ.quantity}</span>
+                      <span className="text-[hsl(var(--muted-foreground))]">
+                        {selectedRFQ.quantity}
+                        {selectedRFQ.unitOfMeasure ? ` ${unitLabel(selectedRFQ.unitOfMeasure)}` : ''}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Building2 className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
@@ -423,6 +525,43 @@ export function RFQsContent() {
                     </div>
                   </div>
                 </div>
+
+                {/* Attachments */}
+                {(selectedRFQ.attachments?.length ?? 0) > 0 && (
+                  <div>
+                    <p className="mb-2 text-sm font-medium text-[hsl(var(--foreground))]">
+                      Attachments
+                    </p>
+                    <ul className="space-y-1.5">
+                      {selectedRFQ.attachments!.map((attachment) => (
+                        <li key={attachment.id}>
+                          <a
+                            href={`/api/rfqs/attachments/${attachment.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-2 rounded-lg border border-[hsl(var(--border))] px-3 py-2 text-sm transition-colors hover:bg-[hsl(var(--muted))]"
+                          >
+                            <Paperclip className="h-4 w-4 shrink-0 text-[hsl(var(--muted-foreground))]" />
+                            <span className="min-w-0 flex-1 truncate text-[hsl(var(--foreground))]">
+                              {attachment.fileName}
+                            </span>
+                            <span className="shrink-0 text-xs text-[hsl(var(--muted-foreground))]">
+                              {formatFileSize(attachment.fileSize)}
+                            </span>
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Supplier quotation */}
+                <QuoteSection
+                  rfq={selectedRFQ}
+                  defaultSupplierName={supplierName(selectedRFQ, activeTab) || ''}
+                  canEdit={canRecordQuote}
+                  onSaved={handleQuoteSaved}
+                />
 
                 {/* Response Section - Only for suppliers on received RFQs */}
                 {activeTab === 'received' && (
@@ -550,13 +689,29 @@ function SingleRFQCard({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">{rfq.title}</h3>
+                {rfq.category && (
+                  <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--muted-foreground))]">
+                    {rfq.category}
+                  </span>
+                )}
                 {rfq.isExternal && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
                     <Radar className="h-3 w-3" />
                     External lead
                   </span>
                 )}
+                {rfq.quote && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
+                    <Tag className="h-3 w-3" />
+                    Quote · {formatQuoteAmount(rfq.quote.totalPrice, rfq.quote.currency)}
+                  </span>
+                )}
               </div>
+              {rfq.itemName && (
+                <p className="mt-0.5 text-sm font-medium text-[hsl(var(--foreground))]">
+                  {rfq.itemName}
+                </p>
+              )}
               {rfq.description && (
                 <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{rfq.description}</p>
               )}
@@ -582,7 +737,7 @@ function SingleRFQCard({
               </div>
             )}
             <div className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
-              <span>Qty: {rfq.quantity}</span>
+              <span>{quantityLabel(rfq)}</span>
             </div>
             <div className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
               <Calendar className="h-4 w-4" />
@@ -608,11 +763,27 @@ function BatchRFQCard({
   activeTab: 'sent' | 'received';
   onViewItem: (rfq: RFQ) => void;
 }) {
+  const [showCompare, setShowCompare] = useState(false);
   const first = items[0];
   const statusCounts = items.reduce<Record<string, number>>((acc, item) => {
     acc[item.status] = (acc[item.status] || 0) + 1;
     return acc;
   }, {});
+
+  // Quote comparison helpers: the "best total" highlight only applies when
+  // every quote is expressed in the same currency.
+  const quoted = items.filter((item) => item.quote);
+  const sameCurrency =
+    quoted.length > 0 &&
+    quoted.every((item) => item.quote!.currency === quoted[0].quote!.currency);
+  const totals = quoted
+    .map((item) => Number(item.quote!.totalPrice))
+    .filter((v) => Number.isFinite(v));
+  const bestTotal = sameCurrency && totals.length > 0 ? Math.min(...totals) : null;
+  const deliveryValues = quoted
+    .map((item) => item.quote!.deliveryTimeDays)
+    .filter((d): d is number => typeof d === 'number');
+  const fastestDelivery = deliveryValues.length > 0 ? Math.min(...deliveryValues) : null;
 
   return (
     <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 transition-shadow hover:shadow-lg">
@@ -630,12 +801,22 @@ function BatchRFQCard({
                 xDiscovery Beta batch
               </span>
             )}
+            {first.category && (
+              <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--muted-foreground))]">
+                {first.category}
+              </span>
+            )}
           </div>
+          {first.itemName && (
+            <p className="mt-0.5 text-sm font-medium text-[hsl(var(--foreground))]">
+              {first.itemName}
+            </p>
+          )}
           {first.description && (
             <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{first.description}</p>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[hsl(var(--muted-foreground))]">
-            <span>Qty per company: {first.quantity}</span>
+            <span>{quantityLabel(first, 'Qty per company')}</span>
             <span className="flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5" />
               {new Date(first.createdAt).toLocaleDateString()}
@@ -677,6 +858,16 @@ function BatchRFQCard({
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-3">
+              {item.quote ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
+                  <Tag className="h-3 w-3" />
+                  Quote received · {formatQuoteAmount(item.quote.totalPrice, item.quote.currency)}
+                </span>
+              ) : (
+                <span className="text-[11px] italic text-[hsl(var(--muted-foreground))]">
+                  Awaiting quote
+                </span>
+              )}
               <StatusBadge status={item.status} />
               <button onClick={() => onViewItem(item)} className="text-xs font-medium text-[hsl(var(--primary))] hover:underline">
                 View →
@@ -685,6 +876,580 @@ function BatchRFQCard({
           </div>
         ))}
       </div>
+
+      <button
+        onClick={() => setShowCompare((v) => !v)}
+        className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-[hsl(var(--primary))] hover:underline"
+      >
+        {showCompare ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        Compare quotes ({quoted.length}/{items.length})
+      </button>
+
+      {showCompare && (
+        <div className="mt-2 overflow-x-auto rounded-lg border border-[hsl(var(--border))]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 text-left text-xs font-medium uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+                <th className="px-3 py-2">Supplier</th>
+                <th className="px-3 py-2">Unit price</th>
+                <th className="px-3 py-2">Total</th>
+                <th className="px-3 py-2">Currency</th>
+                <th className="px-3 py-2">Delivery (d)</th>
+                <th className="px-3 py-2">Lead time (d)</th>
+                <th className="px-3 py-2">Payment terms</th>
+                <th className="px-3 py-2">Certifications</th>
+                <th className="px-3 py-2">Valid until</th>
+                <th className="px-3 py-2">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const quote = item.quote;
+                const total = quote ? Number(quote.totalPrice) : null;
+                const isBest =
+                  quote != null &&
+                  bestTotal != null &&
+                  total != null &&
+                  Number.isFinite(total) &&
+                  total === bestTotal;
+                const isFastest =
+                  quote != null &&
+                  fastestDelivery != null &&
+                  quote.deliveryTimeDays === fastestDelivery;
+                return (
+                  <tr
+                    key={item.id}
+                    className="border-b border-[hsl(var(--border))] last:border-0"
+                  >
+                    <td className="px-3 py-2 font-medium text-[hsl(var(--foreground))]">
+                      {supplierName(item, activeTab)}
+                    </td>
+                    {quote ? (
+                      <>
+                        <td className="px-3 py-2 text-[hsl(var(--foreground))]">
+                          {formatQuoteAmount(quote.unitPrice, quote.currency)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={
+                              isBest
+                                ? 'inline-flex items-center gap-1 font-semibold text-emerald-500'
+                                : 'text-[hsl(var(--foreground))]'
+                            }
+                          >
+                            {formatQuoteAmount(quote.totalPrice, quote.currency)}
+                            {isBest && (
+                              <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                                Best
+                              </span>
+                            )}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-[hsl(var(--muted-foreground))]">
+                          {quote.currency}
+                        </td>
+                        <td
+                          className={`px-3 py-2 ${
+                            isFastest
+                              ? 'font-semibold text-emerald-500'
+                              : 'text-[hsl(var(--muted-foreground))]'
+                          }`}
+                        >
+                          {quote.deliveryTimeDays ?? '—'}
+                          {isFastest ? ' ⚡' : ''}
+                        </td>
+                        <td className="px-3 py-2 text-[hsl(var(--muted-foreground))]">
+                          {quote.leadTimeDays ?? '—'}
+                        </td>
+                        <td className="max-w-[10rem] truncate px-3 py-2 text-[hsl(var(--muted-foreground))]">
+                          {quote.paymentTerms || '—'}
+                        </td>
+                        <td className="px-3 py-2">
+                          {quote.certifications && quote.certifications.length > 0 ? (
+                            <div className="flex max-w-[12rem] flex-wrap gap-1">
+                              {quote.certifications.map((cert) => (
+                                <span
+                                  key={cert}
+                                  className="rounded-full bg-[hsl(var(--muted))] px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--foreground))]"
+                                >
+                                  {cert}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[hsl(var(--muted-foreground))]">—</span>
+                          )}
+                        </td>
+                        <td
+                          className={`px-3 py-2 ${
+                            isQuoteExpired(quote)
+                              ? 'font-medium text-red-500'
+                              : 'text-[hsl(var(--muted-foreground))]'
+                          }`}
+                        >
+                          {quote.validUntil
+                            ? new Date(quote.validUntil).toLocaleDateString()
+                            : '—'}
+                          {isQuoteExpired(quote) ? ' (expired)' : ''}
+                        </td>
+                        <td className="max-w-[12rem] truncate px-3 py-2 text-[hsl(var(--muted-foreground))]">
+                          {quote.notes || '—'}
+                        </td>
+                      </>
+                    ) : (
+                      <td
+                        colSpan={9}
+                        className="px-3 py-2 italic text-[hsl(var(--muted-foreground))]"
+                      >
+                        Awaiting quote
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const QUOTE_INPUT_CLASS =
+  'w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/20';
+
+function QuoteField({ label, value, accent }: { label: string; value: string; accent?: 'expired' | 'strong' }) {
+  return (
+    <div>
+      <p className="text-xs text-[hsl(var(--muted-foreground))]">{label}</p>
+      <p
+        className={`text-sm ${
+          accent === 'expired'
+            ? 'font-medium text-red-500'
+            : accent === 'strong'
+              ? 'font-semibold text-[hsl(var(--foreground))]'
+              : 'font-medium text-[hsl(var(--foreground))]'
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function QuoteSection({
+  rfq,
+  defaultSupplierName,
+  canEdit,
+  onSaved,
+}: {
+  rfq: RFQ;
+  defaultSupplierName: string;
+  canEdit: boolean;
+  onSaved: (updated: RFQ) => void;
+}) {
+  const quote = rfq.quote ?? null;
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  const [supplierNameInput, setSupplierNameInput] = useState('');
+  const [unitPriceInput, setUnitPriceInput] = useState('');
+  const [totalPriceInput, setTotalPriceInput] = useState('');
+  const [totalEdited, setTotalEdited] = useState(false);
+  const [currency, setCurrency] = useState<string>('TND');
+  const [deliveryInput, setDeliveryInput] = useState('');
+  const [leadTimeInput, setLeadTimeInput] = useState('');
+  const [paymentTermsInput, setPaymentTermsInput] = useState('');
+  const [certifications, setCertifications] = useState<string[]>([]);
+  const [certInput, setCertInput] = useState('');
+  const [validUntilInput, setValidUntilInput] = useState('');
+  const [notesInput, setNotesInput] = useState('');
+
+  function startEditing() {
+    setSupplierNameInput(quote?.supplierName ?? defaultSupplierName);
+    setUnitPriceInput(quote ? String(quote.unitPrice) : '');
+    setTotalPriceInput(quote ? String(quote.totalPrice) : '');
+    // Editing an existing quote means the total was already set manually.
+    setTotalEdited(true);
+    setCurrency(quote?.currency ?? 'TND');
+    setDeliveryInput(quote?.deliveryTimeDays != null ? String(quote.deliveryTimeDays) : '');
+    setLeadTimeInput(quote?.leadTimeDays != null ? String(quote.leadTimeDays) : '');
+    setPaymentTermsInput(quote?.paymentTerms ?? '');
+    setCertifications(quote?.certifications ?? []);
+    setCertInput('');
+    setValidUntilInput(quote?.validUntil ? String(quote.validUntil).slice(0, 10) : '');
+    setNotesInput(quote?.notes ?? '');
+    setFormError('');
+    setEditing(true);
+  }
+
+  function handleUnitPriceChange(value: string) {
+    setUnitPriceInput(value);
+    if (!totalEdited) {
+      const unit = parseFloat(value);
+      if (value.trim() && Number.isFinite(unit) && typeof rfq.quantity === 'number') {
+        setTotalPriceInput((unit * rfq.quantity).toFixed(2));
+      } else {
+        setTotalPriceInput('');
+      }
+    }
+  }
+
+  function handleTotalPriceChange(value: string) {
+    setTotalEdited(true);
+    setTotalPriceInput(value);
+  }
+
+  function addCertifications(raw: string) {
+    const parts = raw.split(',');
+    setCertifications((prev) => {
+      const next = [...prev];
+      for (const part of parts) {
+        const trimmed = part.trim();
+        if (trimmed && !next.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+          next.push(trimmed);
+        }
+      }
+      return next.slice(0, 20);
+    });
+  }
+
+  async function saveQuote() {
+    setSaving(true);
+    setFormError('');
+    try {
+      const res = await fetch(`/api/rfqs/${rfq.id}/quote`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierName: supplierNameInput,
+          unitPrice: unitPriceInput,
+          totalPrice: totalPriceInput,
+          currency,
+          deliveryTimeDays: deliveryInput === '' ? null : deliveryInput,
+          leadTimeDays: leadTimeInput === '' ? null : leadTimeInput,
+          paymentTerms: paymentTermsInput,
+          certifications,
+          validUntil: validUntilInput || null,
+          notes: notesInput,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.message || 'Failed to save quote');
+      }
+      onSaved(data as RFQ);
+      setEditing(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Unable to connect to the server');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-[hsl(var(--border))] p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-[hsl(var(--foreground))]">Supplier quotation</h4>
+        {canEdit && !editing && (
+          <button
+            type="button"
+            onClick={startEditing}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[hsl(var(--border))] px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
+          >
+            {quote ? (
+              <>
+                <Pencil className="h-3 w-3" />
+                Edit quote
+              </>
+            ) : (
+              <>
+                <Plus className="h-3 w-3" />
+                Record quote
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {quote && !editing && (
+        <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <QuoteField label="Supplier" value={quote.supplierName} />
+          <QuoteField
+            label="Total price"
+            value={formatQuoteAmount(quote.totalPrice, quote.currency)}
+            accent="strong"
+          />
+          <QuoteField
+            label="Unit price"
+            value={formatQuoteAmount(quote.unitPrice, quote.currency)}
+          />
+          <QuoteField
+            label="Delivery time"
+            value={quote.deliveryTimeDays != null ? `${quote.deliveryTimeDays} days` : '—'}
+          />
+          <QuoteField
+            label="Lead time"
+            value={quote.leadTimeDays != null ? `${quote.leadTimeDays} days` : '—'}
+          />
+          <QuoteField label="Payment terms" value={quote.paymentTerms || '—'} />
+          <QuoteField
+            label="Valid until"
+            value={
+              quote.validUntil
+                ? `${new Date(quote.validUntil).toLocaleDateString()}${isQuoteExpired(quote) ? ' (expired)' : ''}`
+                : '—'
+            }
+            accent={isQuoteExpired(quote) ? 'expired' : undefined}
+          />
+          {quote.certifications && quote.certifications.length > 0 && (
+            <div className="sm:col-span-2 lg:col-span-3">
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">Certifications</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {quote.certifications.map((cert) => (
+                  <span
+                    key={cert}
+                    className="rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-xs font-medium text-[hsl(var(--foreground))]"
+                  >
+                    {cert}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {quote.notes && (
+            <div className="sm:col-span-2 lg:col-span-3">
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">Notes</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-[hsl(var(--muted-foreground))]">
+                {quote.notes}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!quote && !editing && (
+        <p className="text-sm text-[hsl(var(--muted-foreground))]">
+          No quote recorded yet.
+          {canEdit ? ' Record one once the supplier replies (email, phone…).' : ''}
+        </p>
+      )}
+
+      {editing && (
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+              Supplier name *
+            </label>
+            <input
+              value={supplierNameInput}
+              onChange={(e) => setSupplierNameInput(e.target.value)}
+              className={QUOTE_INPUT_CLASS}
+              placeholder="e.g. Emballage du Sud SARL"
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+                Unit price *
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={unitPriceInput}
+                onChange={(e) => handleUnitPriceChange(e.target.value)}
+                className={QUOTE_INPUT_CLASS}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+                Total price *
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={totalPriceInput}
+                onChange={(e) => handleTotalPriceChange(e.target.value)}
+                className={QUOTE_INPUT_CLASS}
+                placeholder={
+                  typeof rfq.quantity === 'number' ? 'auto = unit × qty' : '0.00'
+                }
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+                Currency *
+              </label>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className={QUOTE_INPUT_CLASS}
+              >
+                {QUOTE_CURRENCIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+                Delivery time (days)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={deliveryInput}
+                onChange={(e) => setDeliveryInput(e.target.value)}
+                className={QUOTE_INPUT_CLASS}
+                placeholder="e.g. 14"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+                Lead time (days)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={leadTimeInput}
+                onChange={(e) => setLeadTimeInput(e.target.value)}
+                className={QUOTE_INPUT_CLASS}
+                placeholder="e.g. 7"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+                Quote validity
+              </label>
+              <input
+                type="date"
+                value={validUntilInput}
+                onChange={(e) => setValidUntilInput(e.target.value)}
+                className={QUOTE_INPUT_CLASS}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+              Payment terms
+            </label>
+            <input
+              list="rfq-payment-terms-suggestions"
+              value={paymentTermsInput}
+              onChange={(e) => setPaymentTermsInput(e.target.value)}
+              className={QUOTE_INPUT_CLASS}
+              placeholder="e.g. 30 jours fin de mois"
+            />
+            <datalist id="rfq-payment-terms-suggestions">
+              {PAYMENT_TERMS_SUGGESTIONS.map((term) => (
+                <option key={term} value={term} />
+              ))}
+            </datalist>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+              Certifications
+            </label>
+            <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2.5 py-2 focus-within:border-[hsl(var(--primary))]">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {certifications.map((cert) => (
+                  <span
+                    key={cert}
+                    className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-xs font-medium text-[hsl(var(--foreground))]"
+                  >
+                    {cert}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCertifications((prev) => prev.filter((c) => c !== cert))
+                      }
+                      className="text-[hsl(var(--muted-foreground))] hover:text-red-500"
+                      aria-label={`Remove ${cert}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  value={certInput}
+                  onChange={(e) => setCertInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ',') {
+                      e.preventDefault();
+                      if (certInput.trim()) {
+                        addCertifications(certInput);
+                        setCertInput('');
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    if (certInput.trim()) {
+                      addCertifications(certInput);
+                      setCertInput('');
+                    }
+                  }}
+                  placeholder={
+                    certifications.length === 0 ? 'e.g. ISO 9001 — Enter or comma to add' : ''
+                  }
+                  className="min-w-[10rem] flex-1 bg-transparent py-0.5 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))]"
+                />
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[hsl(var(--muted-foreground))]">
+              Notes
+            </label>
+            <textarea
+              rows={3}
+              value={notesInput}
+              onChange={(e) => setNotesInput(e.target.value)}
+              className={QUOTE_INPUT_CLASS}
+              placeholder="Minimum order quantities, surcharges, options…"
+            />
+          </div>
+
+          {formError && (
+            <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3">
+              <p className="text-sm text-red-500">{formError}</p>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              disabled={saving}
+              className="flex-1 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4 py-2 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))] disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveQuote}
+              disabled={
+                saving ||
+                !supplierNameInput.trim() ||
+                !unitPriceInput.trim() ||
+                !totalPriceInput.trim()
+              }
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              {quote ? 'Update quote' : 'Save quote'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
