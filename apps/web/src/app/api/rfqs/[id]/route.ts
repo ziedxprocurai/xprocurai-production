@@ -14,22 +14,17 @@ export async function PATCH(
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  if (!user.company) {
-    return NextResponse.json(
-      { message: 'User must belong to a company' },
-      { status: 403 },
-    );
-  }
-
   try {
     const body = await req.json();
 
+    // Buyer-side ownership is per-user; the supplierId branch keeps the
+    // onboarded-supplier "Received RFQs" inbox working.
     const rfq = await prisma.rFQ.findFirst({
       where: {
         id,
         OR: [
-          { buyerId: user.company.id },
-          { supplierId: user.company.id },
+          { userId: user.id },
+          ...(user.company ? [{ supplierId: user.company.id }] : []),
         ],
       },
     });
@@ -58,6 +53,7 @@ export async function PATCH(
           },
         },
         quote: true,
+        _count: { select: { messages: true } },
       },
     });
 

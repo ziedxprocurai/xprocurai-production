@@ -31,8 +31,11 @@ import {
 import { getRecentLeadCompanies, pushRecentLeadCompany, type RecentLeadCompany } from '@/lib/recent-lead-companies';
 import {
   ALLOWED_RFQ_ATTACHMENT_EXTENSIONS,
+  INCOTERMS,
   MAX_RFQ_ATTACHMENT_BYTES,
   MAX_RFQ_ATTACHMENTS,
+  PAYMENT_TERMS_SUGGESTIONS,
+  QUOTE_CURRENCIES,
   RFQ_CATEGORIES,
   UNIT_OF_MEASURE_OPTIONS,
   formatFileSize,
@@ -209,6 +212,14 @@ export function DiscoveryBetaContent() {
   const [rfqSpecifications, setRfqSpecifications] = useState('');
   const [rfqQuantity, setRfqQuantity] = useState(1);
   const [rfqUnit, setRfqUnit] = useState<RFQUnitOfMeasureValue>('PIECE');
+  const [rfqDeliveryDate, setRfqDeliveryDate] = useState('');
+  const [rfqDeliveryLocation, setRfqDeliveryLocation] = useState('');
+  const [rfqCurrency, setRfqCurrency] = useState('');
+  const [rfqTargetBudget, setRfqTargetBudget] = useState('');
+  const [rfqIncoterm, setRfqIncoterm] = useState('');
+  const [rfqPaymentTerms, setRfqPaymentTerms] = useState('');
+  const [rfqAdditionalRequirements, setRfqAdditionalRequirements] = useState('');
+  const [rfqShowTerms, setRfqShowTerms] = useState(false);
   const [rfqFiles, setRfqFiles] = useState<File[]>([]);
   const [rfqFileError, setRfqFileError] = useState('');
   const [rfqDragActive, setRfqDragActive] = useState(false);
@@ -388,6 +399,14 @@ export function DiscoveryBetaContent() {
     setRfqSpecifications('');
     setRfqQuantity(1);
     setRfqUnit('PIECE');
+    setRfqDeliveryDate('');
+    setRfqDeliveryLocation('');
+    setRfqCurrency('');
+    setRfqTargetBudget('');
+    setRfqIncoterm('');
+    setRfqPaymentTerms('');
+    setRfqAdditionalRequirements('');
+    setRfqShowTerms(false);
     setRfqFiles([]);
     setRfqFileError('');
     setRfqDragActive(false);
@@ -529,6 +548,13 @@ export function DiscoveryBetaContent() {
               itemName: rfqItemName,
               quantity: rfqQuantity,
               unitOfMeasure: rfqUnit,
+              requiredDeliveryDate: rfqDeliveryDate || null,
+              deliveryLocation: rfqDeliveryLocation || null,
+              currency: rfqCurrency || null,
+              targetBudget: rfqTargetBudget !== '' ? Number(rfqTargetBudget) : null,
+              incoterm: rfqIncoterm || null,
+              paymentTerms: rfqPaymentTerms || null,
+              additionalRequirements: rfqAdditionalRequirements || null,
               attachments,
               isExternal: true,
               leadCompanyId: id,
@@ -551,12 +577,37 @@ export function DiscoveryBetaContent() {
       );
 
       const failures = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
-      const succeeded = results.length - failures.length;
+      const fulfilled = results.filter((r) => r.status === 'fulfilled') as PromiseFulfilledResult<{
+        emailStatus?: string | null;
+      }>[];
+      const succeeded = fulfilled.length;
 
       if (succeeded > 0) {
-        setRfqSuccess(
-          `Sent ${succeeded} RFQ${succeeded === 1 ? '' : 's'}${failures.length ? ` (${failures.length} failed)` : ''}. Check RFQ Management for details.`,
-        );
+        // POST /api/rfqs awaits the Graph send, so emailStatus is final by now.
+        const emailed = fulfilled.filter(
+          (r) =>
+            r.value?.emailStatus === 'WAITING_REPLY' ||
+            r.value?.emailStatus === 'SENT' ||
+            r.value?.emailStatus === 'QUEUED',
+        ).length;
+        const emailFailed = fulfilled.filter((r) => r.value?.emailStatus === 'FAILED').length;
+        const phoneOnly = succeeded - emailed - emailFailed;
+        const parts: string[] = [];
+        if (emailed > 0) {
+          parts.push(`Sent ${emailed} RFQ email${emailed === 1 ? '' : 's'}`);
+        }
+        if (emailFailed > 0) {
+          parts.push(
+            `Created ${succeeded} RFQ${succeeded === 1 ? '' : 's'} — ${emailFailed} email${emailFailed === 1 ? '' : 's'} failed (retry from RFQ Management)`,
+          );
+        }
+        if (phoneOnly > 0) {
+          parts.push(`${phoneOnly} logged without email (phone contact only)`);
+        }
+        if (failures.length > 0) {
+          parts.push(`${failures.length} failed`);
+        }
+        setRfqSuccess(`${parts.join(' · ')}. Check RFQ Management for details.`);
         // Only clear the companies that actually succeeded from the selection.
         const failedNames = new Set(failures.map((f) => f.reason?.message));
         setSelectedIds((prev) => {
@@ -1114,8 +1165,8 @@ export function DiscoveryBetaContent() {
             </div>
 
             <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-600 dark:text-amber-400">
-              These companies aren't onboarded suppliers yet. The RFQ send is mocked using the best email/phone we
-              found for them, and will appear in RFQ Management as an external lead.
+              RFQs are sent from the shared XprocurAI mailbox to the email found for each company. Supplier replies
+              will appear in RFQ Management. Phone-only companies are logged without email.
             </div>
 
             <div className="mb-4 space-y-2">
@@ -1234,6 +1285,133 @@ export function DiscoveryBetaContent() {
                     ))}
                   </select>
                 </div>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-[hsl(var(--border))]">
+                <button
+                  type="button"
+                  onClick={() => setRfqShowTerms((v) => !v)}
+                  className="flex w-full items-center justify-between bg-[hsl(var(--muted))]/20 px-4 py-3 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]/40"
+                >
+                  <span>Delivery &amp; commercial terms (optional)</span>
+                  {rfqShowTerms ? (
+                    <ChevronUp className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
+                  )}
+                </button>
+                {rfqShowTerms && (
+                  <div className="space-y-4 border-t border-[hsl(var(--border))] p-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                          Required delivery date
+                        </label>
+                        <input
+                          type="date"
+                          min={new Date().toISOString().slice(0, 10)}
+                          value={rfqDeliveryDate}
+                          onChange={(e) => setRfqDeliveryDate(e.target.value)}
+                          className="input-field"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                          Delivery location
+                        </label>
+                        <input
+                          maxLength={300}
+                          value={rfqDeliveryLocation}
+                          onChange={(e) => setRfqDeliveryLocation(e.target.value)}
+                          className="input-field"
+                          placeholder="e.g. Site Tunis, Tunisie"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                          Currency
+                        </label>
+                        <select
+                          value={rfqCurrency}
+                          onChange={(e) => setRfqCurrency(e.target.value)}
+                          className="input-field"
+                        >
+                          <option value="">—</option>
+                          {QUOTE_CURRENCIES.map((currency) => (
+                            <option key={currency} value={currency}>
+                              {currency}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                          Target budget
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={rfqTargetBudget}
+                          onChange={(e) => setRfqTargetBudget(e.target.value)}
+                          className="input-field"
+                          placeholder="e.g. 15000.00"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                          Incoterm
+                        </label>
+                        <select
+                          value={rfqIncoterm}
+                          onChange={(e) => setRfqIncoterm(e.target.value)}
+                          className="input-field"
+                        >
+                          <option value="">—</option>
+                          {INCOTERMS.map((incoterm) => (
+                            <option key={incoterm.value} value={incoterm.value}>
+                              {incoterm.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                          Payment terms
+                        </label>
+                        <input
+                          list="rfq-payment-terms-suggestions"
+                          maxLength={500}
+                          value={rfqPaymentTerms}
+                          onChange={(e) => setRfqPaymentTerms(e.target.value)}
+                          className="input-field"
+                          placeholder="e.g. 30 jours fin de mois"
+                        />
+                        <datalist id="rfq-payment-terms-suggestions">
+                          {PAYMENT_TERMS_SUGGESTIONS.map((term) => (
+                            <option key={term} value={term} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
+                        Additional requirements / notes
+                      </label>
+                      <textarea
+                        rows={3}
+                        maxLength={5000}
+                        value={rfqAdditionalRequirements}
+                        onChange={(e) => setRfqAdditionalRequirements(e.target.value)}
+                        className="input-field"
+                        placeholder="Certifications, packaging constraints, delivery windows..."
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">Attachments</label>

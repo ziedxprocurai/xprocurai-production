@@ -24,9 +24,11 @@ import {
   ChevronUp,
   Pencil,
   Plus,
+  RefreshCw,
   Tag,
 } from 'lucide-react';
 import {
+  INCOTERMS,
   PAYMENT_TERMS_SUGGESTIONS,
   QUOTE_CURRENCIES,
   formatFileSize,
@@ -59,6 +61,30 @@ interface RFQQuote {
   updatedAt?: string;
 }
 
+type RFQEmailStatus = 'QUEUED' | 'SENT' | 'WAITING_REPLY' | 'REPLIED' | 'FAILED';
+
+interface RfqRequestPayloadShape {
+  title?: string;
+  category?: string | null;
+  itemName?: string | null;
+  specifications?: string | null;
+  quantity?: number | null;
+  unitOfMeasure?: string | null;
+  requiredDeliveryDate?: string | null;
+  deliveryLocation?: string | null;
+  currency?: string | null;
+  targetBudget?: number | null;
+  incoterm?: string | null;
+  paymentTerms?: string | null;
+  additionalRequirements?: string | null;
+  attachments?: {
+    path: string;
+    fileName: string;
+    fileSize: number;
+    mimeType?: string | null;
+  }[];
+}
+
 interface RFQ {
   id: string;
   title: string;
@@ -71,6 +97,20 @@ interface RFQ {
   quote?: RFQQuote | null;
   status: 'PENDING' | 'REVIEWED' | 'RESPONDED' | 'ACCEPTED' | 'REJECTED';
   response?: string;
+  reference?: string | null;
+  emailStatus?: RFQEmailStatus | null;
+  emailError?: string | null;
+  emailSentAt?: string | null;
+  lastReplyAt?: string | null;
+  requiredDeliveryDate?: string | null;
+  deliveryLocation?: string | null;
+  currency?: string | null;
+  targetBudget?: string | number | null;
+  incoterm?: string | null;
+  paymentTerms?: string | null;
+  additionalRequirements?: string | null;
+  requestPayload?: RfqRequestPayloadShape | null;
+  _count?: { messages: number };
   createdAt: string;
   updatedAt: string;
   buyer?: {
@@ -193,6 +233,86 @@ const STATUS_CONFIG = {
   },
 };
 
+const EMAIL_STATUS_CONFIG: Record<
+  RFQEmailStatus,
+  { label: string; icon: typeof Clock; color: string }
+> = {
+  QUEUED: {
+    label: 'Sending…',
+    icon: Loader2,
+    color: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
+  },
+  SENT: {
+    label: 'No reply yet',
+    icon: Clock,
+    color: 'text-slate-500 bg-slate-500/10 border-slate-500/20',
+  },
+  WAITING_REPLY: {
+    label: 'No reply yet',
+    icon: Clock,
+    color: 'text-blue-500 bg-blue-500/10 border-blue-500/20',
+  },
+  REPLIED: {
+    label: 'Reply received',
+    icon: MessageSquare,
+    color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
+  },
+  FAILED: {
+    label: 'Failed',
+    icon: XCircle,
+    color: 'text-red-500 bg-red-500/10 border-red-500/20',
+  },
+};
+
+interface RFQMessageAttachmentItem {
+  id: string;
+  filename: string;
+  mimeType?: string | null;
+  size: number;
+  isInline: boolean;
+  attachmentType: string;
+}
+
+interface RFQMessageItem {
+  id: string;
+  direction: 'OUTBOUND' | 'INBOUND';
+  kind: 'RFQ_REQUEST' | 'REPLY' | 'AUTO_REPLY' | 'BOUNCE';
+  subject?: string | null;
+  fromEmail?: string | null;
+  fromName?: string | null;
+  toRecipients?: unknown;
+  bodyText?: string | null;
+  bodyHtml?: string | null;
+  sentAt?: string | null;
+  receivedAt?: string | null;
+  createdAt: string;
+  senderMatchesSupplier?: boolean | null;
+  attachments?: RFQMessageAttachmentItem[];
+}
+
+const EMAIL_CSP_META =
+  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data: cid:; style-src \'unsafe-inline\'; font-src data:">';
+
+/** toRecipients is stored as [{address,name}] (outbound) or Graph's
+ * [{emailAddress:{address,name}}] (inbound) — normalize for display. */
+function recipientLabel(value: unknown): string {
+  if (!Array.isArray(value)) return '';
+  return value
+    .map((r) => {
+      const addr = r?.emailAddress?.address ?? r?.address ?? '';
+      const name = r?.emailAddress?.name ?? r?.name;
+      if (name && addr) return `${name} <${addr}>`;
+      return addr || name || '';
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
+function messageTimestamp(message: RFQMessageItem): string {
+  const raw = message.sentAt ?? message.receivedAt ?? message.createdAt;
+  return raw ? new Date(raw).toLocaleString() : '';
+}
+
 export function RFQsContent() {
   const [activeTab, setActiveTab] = useState<'sent' | 'received'>('sent');
   const [sentRFQs, setSentRFQs] = useState<RFQ[]>([]);
@@ -204,6 +324,10 @@ export function RFQsContent() {
   const [responseText, setResponseText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [company, setCompany] = useState<any>(null);
+  const [messages, setMessages] = useState<RFQMessageItem[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesError, setMessagesError] = useState('');
+  const [retryingSend, setRetryingSend] = useState(false);
 
   const isBuyer = company?.roles?.includes('BUYER');
   const isSupplier = company?.roles?.includes('SUPPLIER');
@@ -266,12 +390,62 @@ export function RFQsContent() {
     setResponseText(rfq.response || '');
     setShowDetailModal(true);
     setError('');
+    setMessages([]);
+    setMessagesError('');
+    setMessagesLoading(false);
+    // The email conversation is only meaningful for emailed sent RFQs.
+    if (activeTab === 'sent' && rfq.emailStatus) {
+      void fetchRfqMessages(rfq.id);
+    }
   }
 
   function closeDetailModal() {
     setShowDetailModal(false);
     setSelectedRFQ(null);
     setResponseText('');
+    setMessages([]);
+    setMessagesError('');
+  }
+
+  async function fetchRfqMessages(rfqId: string) {
+    setMessagesLoading(true);
+    setMessagesError('');
+    try {
+      const res = await fetch(`/api/rfqs/${rfqId}/messages`);
+      if (!res.ok) {
+        throw new Error('Failed to load the conversation');
+      }
+      const data = await res.json();
+      setMessages(data.messages || []);
+    } catch {
+      setMessagesError('Failed to load the conversation');
+    } finally {
+      setMessagesLoading(false);
+    }
+  }
+
+  async function handleRetrySend() {
+    if (!selectedRFQ) return;
+    setRetryingSend(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/rfqs/${selectedRFQ.id}/send`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        // A failed send still returns the RFQ (with emailStatus FAILED) — the
+        // row always exists, so replace it in state either way.
+        setSentRFQs((prev) => prev.map((r) => (r.id === data.id ? data : r)));
+        setReceivedRFQs((prev) => prev.map((r) => (r.id === data.id ? data : r)));
+        setSelectedRFQ(data);
+        void fetchRfqMessages(data.id);
+      } else {
+        setError(data.message || 'Failed to resend the RFQ email');
+      }
+    } catch {
+      setError('Unable to connect to the server');
+    } finally {
+      setRetryingSend(false);
+    }
   }
 
   async function handleStatusUpdate(status: RFQ['status']) {
@@ -418,21 +592,30 @@ export function RFQsContent() {
               </div>
 
               <div className="space-y-4">
-                {/* Status Badge */}
+                {/* Status Badge — emailed RFQs show the email lifecycle instead */}
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Status:</span>
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${STATUS_CONFIG[selectedRFQ.status].color}`}
-                  >
-                    {React.createElement(STATUS_CONFIG[selectedRFQ.status].icon, { className: 'h-3 w-3' })}
-                    {STATUS_CONFIG[selectedRFQ.status].label}
-                  </span>
+                  {selectedRFQ.emailStatus ? (
+                    <EmailStatusBadge status={selectedRFQ.emailStatus} />
+                  ) : (
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${STATUS_CONFIG[selectedRFQ.status].color}`}
+                    >
+                      {React.createElement(STATUS_CONFIG[selectedRFQ.status].icon, { className: 'h-3 w-3' })}
+                      {STATUS_CONFIG[selectedRFQ.status].label}
+                    </span>
+                  )}
                 </div>
 
                 {/* RFQ Information */}
                 <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 p-4">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <h3 className="font-semibold text-[hsl(var(--foreground))]">{selectedRFQ.title}</h3>
+                    {selectedRFQ.reference && (
+                      <span className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-1.5 py-0.5 font-mono text-[10px] font-medium text-[hsl(var(--muted-foreground))]">
+                        {selectedRFQ.reference}
+                      </span>
+                    )}
                     {selectedRFQ.category && (
                       <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2.5 py-0.5 text-[11px] font-medium text-[hsl(var(--muted-foreground))]">
                         {selectedRFQ.category}
@@ -512,7 +695,7 @@ export function RFQsContent() {
                         )}
                         <p className="text-xs italic text-[hsl(var(--muted-foreground))]">
                           This request was sent to a lead sourced from xDiscovery Beta, not yet an onboarded
-                          supplier — the send is mocked for now.
+                          supplier.
                         </p>
                       </>
                     )}
@@ -525,6 +708,43 @@ export function RFQsContent() {
                     </div>
                   </div>
                 </div>
+
+                {/* Request details — every populated field of the submitted
+                    payload (columns first, requestPayload as fallback) */}
+                <RequestDetails rfq={selectedRFQ} />
+
+                {/* Email failure panel */}
+                {selectedRFQ.emailStatus === 'FAILED' && (
+                  <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4">
+                    <p className="mb-1 text-sm font-medium text-red-500">Email delivery failed</p>
+                    {selectedRFQ.emailError && (
+                      <p className="mb-3 text-xs text-red-500/80">{selectedRFQ.emailError}</p>
+                    )}
+                    <button
+                      onClick={handleRetrySend}
+                      disabled={retryingSend}
+                      className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+                    >
+                      {retryingSend ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      Retry sending
+                    </button>
+                  </div>
+                )}
+
+                {/* Conversation */}
+                {activeTab === 'sent' && selectedRFQ.emailStatus && (
+                  <ConversationSection
+                    rfq={selectedRFQ}
+                    messages={messages}
+                    loading={messagesLoading}
+                    error={messagesError}
+                    onRefresh={() => void fetchRfqMessages(selectedRFQ.id)}
+                  />
+                )}
 
                 {/* Attachments */}
                 {(selectedRFQ.attachments?.length ?? 0) > 0 && (
@@ -672,6 +892,287 @@ function StatusBadge({ status }: { status: RFQ['status'] }) {
   );
 }
 
+function EmailStatusBadge({ status }: { status: RFQEmailStatus }) {
+  const config = EMAIL_STATUS_CONFIG[status];
+  const Icon = config.icon;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${config.color}`}>
+      <Icon className={`h-3 w-3 ${status === 'QUEUED' ? 'animate-spin' : ''}`} />
+      {config.label}
+    </span>
+  );
+}
+
+/** Emailed RFQs display their email lifecycle badge; everything else keeps
+ * the RFQ status badge. */
+function RfqBadge({ rfq }: { rfq: RFQ }) {
+  return rfq.emailStatus ? (
+    <EmailStatusBadge status={rfq.emailStatus} />
+  ) : (
+    <StatusBadge status={rfq.status} />
+  );
+}
+
+function ReferenceChip({ reference }: { reference?: string | null }) {
+  if (!reference) return null;
+  return (
+    <span className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-1.5 py-0.5 font-mono text-[10px] font-medium text-[hsl(var(--muted-foreground))]">
+      {reference}
+    </span>
+  );
+}
+
+/** Small thread indicator — only when at least one inbound reply exists. */
+function ReplyCount({ rfq }: { rfq: RFQ }) {
+  const inbound = Math.max(0, (rfq._count?.messages ?? 0) - (rfq.emailSentAt ? 1 : 0));
+  if (!rfq.lastReplyAt || inbound === 0) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-500"
+      title={`Last reply ${new Date(rfq.lastReplyAt).toLocaleString()}`}
+    >
+      <MessageSquare className="h-3 w-3" />
+      {inbound} {inbound === 1 ? 'reply' : 'replies'}
+    </span>
+  );
+}
+
+function RequestDetails({ rfq }: { rfq: RFQ }) {
+  const payload = rfq.requestPayload ?? {};
+  const quantity = rfq.quantity ?? payload.quantity;
+  const unit = rfq.unitOfMeasure ?? payload.unitOfMeasure;
+  const incotermValue = rfq.incoterm ?? payload.incoterm;
+  const incotermLabel = incotermValue
+    ? (INCOTERMS.find((i) => i.value === incotermValue)?.label ?? incotermValue)
+    : null;
+  const budget = rfq.targetBudget ?? payload.targetBudget;
+  const currency = rfq.currency ?? payload.currency;
+  const deliveryDate = rfq.requiredDeliveryDate ?? payload.requiredDeliveryDate;
+  const specifications = rfq.description ?? payload.specifications;
+  const additional = rfq.additionalRequirements ?? payload.additionalRequirements;
+
+  const rows: { label: string; value: string; mono?: boolean }[] = [];
+  if (rfq.reference) rows.push({ label: 'Reference', value: rfq.reference, mono: true });
+  const title = rfq.title || payload.title;
+  if (title) rows.push({ label: 'Title', value: title });
+  const category = rfq.category ?? payload.category;
+  if (category) rows.push({ label: 'Category', value: category });
+  const itemName = rfq.itemName ?? payload.itemName;
+  if (itemName) rows.push({ label: 'Item / Service', value: itemName });
+  if (quantity != null) {
+    rows.push({ label: 'Quantity', value: `${quantity}${unit ? ` ${unitLabel(unit)}` : ''}` });
+  }
+  if (deliveryDate) {
+    rows.push({ label: 'Delivery date', value: new Date(deliveryDate).toLocaleDateString() });
+  }
+  const location = rfq.deliveryLocation ?? payload.deliveryLocation;
+  if (location) rows.push({ label: 'Delivery location', value: location });
+  if (currency) rows.push({ label: 'Currency', value: currency });
+  if (budget != null && Number.isFinite(Number(budget))) {
+    rows.push({ label: 'Target budget', value: formatQuoteAmount(budget, currency) });
+  }
+  if (incotermLabel) rows.push({ label: 'Incoterm', value: incotermLabel });
+  const payment = rfq.paymentTerms ?? payload.paymentTerms;
+  if (payment) rows.push({ label: 'Payment terms', value: payment });
+  if (specifications) rows.push({ label: 'Specifications', value: specifications });
+  if (additional) rows.push({ label: 'Additional requirements', value: additional });
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-[hsl(var(--border))] p-4">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+        Request details
+      </p>
+      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        {rows.map((row) => (
+          <div key={row.label} className={row.value.length > 120 ? 'sm:col-span-2' : ''}>
+            <dt className="text-xs font-medium text-[hsl(var(--muted-foreground))]">{row.label}</dt>
+            <dd
+              className={`whitespace-pre-wrap break-words text-[hsl(var(--foreground))] ${row.mono ? 'font-mono text-xs' : ''}`}
+            >
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function ConversationSection({
+  rfq,
+  messages,
+  loading,
+  error,
+  onRefresh,
+}: {
+  rfq: RFQ;
+  messages: RFQMessageItem[];
+  loading: boolean;
+  error: string;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-[hsl(var(--border))] p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+          Conversation
+        </p>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="rounded-md p-1 text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] disabled:opacity-50"
+          aria-label="Refresh conversation"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+      {loading && (
+        <p className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading conversation…
+        </p>
+      )}
+      {!loading && error && <p className="text-sm text-red-500">{error}</p>}
+      {!loading && !error && messages.length === 0 && (
+        <p className="text-sm italic text-[hsl(var(--muted-foreground))]">
+          No messages recorded yet. Replies will appear here once they arrive.
+        </p>
+      )}
+      {!loading && !error && messages.length > 0 && (
+        <div className="space-y-3">
+          {messages.map((message) => (
+            <MessageItem key={message.id} rfq={rfq} message={message} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessageItem({ rfq, message }: { rfq: RFQ; message: RFQMessageItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const outbound = message.direction === 'OUTBOUND';
+  const toLabel = outbound ? recipientLabel(message.toRecipients) : '';
+
+  return (
+    <div
+      className={`rounded-xl border p-3 text-sm ${
+        outbound
+          ? 'ml-8 border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/5'
+          : 'mr-8 border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30'
+      }`}
+    >
+      <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-xs font-semibold text-[hsl(var(--foreground))]">
+          {outbound
+            ? `XprocurAi → ${toLabel || 'supplier'}`
+            : message.fromName
+              ? `${message.fromName} <${message.fromEmail}>`
+              : message.fromEmail || 'Unknown sender'}
+        </span>
+        <span className="text-[11px] text-[hsl(var(--muted-foreground))]">
+          {messageTimestamp(message)}
+        </span>
+        {message.kind === 'AUTO_REPLY' && (
+          <span className="rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+            Auto-reply
+          </span>
+        )}
+        {message.kind === 'BOUNCE' && (
+          <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500">
+            Delivery failure
+          </span>
+        )}
+        {!outbound && message.senderMatchesSupplier === false && (
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500">
+            Different sender
+          </span>
+        )}
+      </div>
+      {message.subject && (
+        <p className="mb-1 text-xs font-medium text-[hsl(var(--muted-foreground))]">
+          {message.subject}
+        </p>
+      )}
+      {message.bodyText && (
+        <div>
+          <p
+            className={`whitespace-pre-wrap break-words text-sm text-[hsl(var(--foreground))] ${
+              expanded ? '' : 'line-clamp-[12]'
+            }`}
+          >
+            {message.bodyText}
+          </p>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-1 text-xs font-medium text-[hsl(var(--primary))] hover:underline"
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        </div>
+      )}
+      {message.bodyHtml && (
+        <div className="mt-1">
+          <button
+            onClick={() => setShowOriginal((v) => !v)}
+            className="text-xs font-medium text-[hsl(var(--primary))] hover:underline"
+          >
+            {showOriginal ? 'Hide original' : 'View original'}
+          </button>
+          {showOriginal && (
+            <iframe
+              sandbox=""
+              srcDoc={`${EMAIL_CSP_META}${message.bodyHtml}`}
+              referrerPolicy="no-referrer"
+              title="Original email"
+              className="mt-2 h-[400px] w-full rounded-lg border border-[hsl(var(--border))] bg-white"
+            />
+          )}
+        </div>
+      )}
+      {(message.attachments?.length ?? 0) > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {message.attachments!.map((attachment) => {
+            const downloadable = attachment.attachmentType !== 'reference';
+            const chip = (
+              <>
+                <Paperclip className="h-3 w-3 shrink-0 text-[hsl(var(--muted-foreground))]" />
+                <span className="max-w-[14rem] truncate">{attachment.filename}</span>
+                <span className="shrink-0 text-[10px] text-[hsl(var(--muted-foreground))]">
+                  {formatFileSize(attachment.size)}
+                </span>
+                {attachment.isInline && (
+                  <span className="rounded-full bg-[hsl(var(--muted))] px-1.5 py-0.5 text-[9px] font-medium uppercase text-[hsl(var(--muted-foreground))]">
+                    inline
+                  </span>
+                )}
+              </>
+            );
+            return downloadable ? (
+              <a
+                key={attachment.id}
+                href={`/api/rfqs/${rfq.id}/attachments/${attachment.id}/download`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2 py-1 text-[11px] font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
+              >
+                {chip}
+              </a>
+            ) : (
+              <span
+                key={attachment.id}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 px-2 py-1 text-[11px] text-[hsl(var(--muted-foreground))]"
+              >
+                {chip}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SingleRFQCard({
   rfq,
   activeTab,
@@ -689,6 +1190,7 @@ function SingleRFQCard({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">{rfq.title}</h3>
+                <ReferenceChip reference={rfq.reference} />
                 {rfq.category && (
                   <span className="rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--muted-foreground))]">
                     {rfq.category}
@@ -716,7 +1218,10 @@ function SingleRFQCard({
                 <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{rfq.description}</p>
               )}
             </div>
-            <StatusBadge status={rfq.status} />
+            <div className="flex flex-col items-end gap-1.5">
+              <RfqBadge rfq={rfq} />
+              <ReplyCount rfq={rfq} />
+            </div>
           </div>
 
           <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -765,8 +1270,10 @@ function BatchRFQCard({
 }) {
   const [showCompare, setShowCompare] = useState(false);
   const first = items[0];
+  // Emailed RFQs are summarized by their email lifecycle, not RFQStatus.
   const statusCounts = items.reduce<Record<string, number>>((acc, item) => {
-    acc[item.status] = (acc[item.status] || 0) + 1;
+    const key = item.emailStatus ?? item.status;
+    acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
 
@@ -826,14 +1333,20 @@ function BatchRFQCard({
 
         {/* Status summary across the batch */}
         <div className="flex flex-wrap gap-2">
-          {Object.entries(statusCounts).map(([status, count]) => (
-            <span
-              key={status}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_CONFIG[status as RFQ['status']].color}`}
-            >
-              {count} {STATUS_CONFIG[status as RFQ['status']].label}
-            </span>
-          ))}
+          {Object.entries(statusCounts).map(([status, count]) => {
+            const config =
+              EMAIL_STATUS_CONFIG[status as RFQEmailStatus] ??
+              STATUS_CONFIG[status as RFQ['status']];
+            if (!config) return null;
+            return (
+              <span
+                key={status}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${config.color}`}
+              >
+                {count} {config.label}
+              </span>
+            );
+          })}
         </div>
       </div>
 
@@ -846,8 +1359,9 @@ function BatchRFQCard({
             <div className="flex min-w-0 items-center gap-2">
               <Building2 className="h-4 w-4 shrink-0 text-[hsl(var(--muted-foreground))]" />
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-[hsl(var(--foreground))]">
-                  {supplierName(item, activeTab)}
+                <p className="flex items-center gap-2 truncate text-sm font-medium text-[hsl(var(--foreground))]">
+                  <span className="truncate">{supplierName(item, activeTab)}</span>
+                  <ReferenceChip reference={item.reference} />
                 </p>
                 {item.isExternal && (item.externalContactEmail || item.externalContactPhone) && (
                   <p className="flex items-center gap-1 truncate text-xs text-[hsl(var(--muted-foreground))]">
@@ -868,7 +1382,8 @@ function BatchRFQCard({
                   Awaiting quote
                 </span>
               )}
-              <StatusBadge status={item.status} />
+              <RfqBadge rfq={item} />
+              <ReplyCount rfq={item} />
               <button onClick={() => onViewItem(item)} className="text-xs font-medium text-[hsl(var(--primary))] hover:underline">
                 View →
               </button>

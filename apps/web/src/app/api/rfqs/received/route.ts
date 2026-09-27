@@ -31,6 +31,7 @@ export async function GET() {
           },
         },
         quote: true,
+        _count: { select: { messages: true } },
       },
       orderBy: { createdAt: 'desc' },
     });

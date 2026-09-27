@@ -25,8 +25,11 @@ model User {
   company      Company?     @relation(fields: [companyId], references: [id])
   scraperJobs  ScraperJob[]
 
-  uploadedRfqAttachments RFQAttachment[] @relation("RFQAttachmentUploader")
-  recordedRfqQuotes      RFQQuote[]      @relation("RFQQuoteRecorder")
+  uploadedRfqAttachments RFQAttachment[]         @relation("RFQAttachmentUploader")
+  recordedRfqQuotes      RFQQuote[]              @relation("RFQQuoteRecorder")
+  ownedRfqs              RFQ[]                   @relation("RFQOwner")
+  rfqMessages            RFQMessage[]            @relation("RFQMessageOwner")
+  rfqMessageAttachments  RFQMessageAttachment[]  @relation("RFQMessageAttachmentOwner")
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
 
@@ -185,15 +188,150 @@ model RFQ {
   // single-target RFQs (e.g. the existing Suppliers page flow).
   batchId String? @map("batch_id")
 
-  attachments RFQAttachment[]
-  quote       RFQQuote?
+  // Owning user — always set from the authenticated session server-side,
+  // never from the client. Buyer-side visibility is scoped to this column.
+  userId String? @map("user_id")
+  user   User?   @relation("RFQOwner", fields: [userId], references: [id], onDelete: SetNull)
+
+  // Public-facing reference used in the email subject and matched on inbound
+  // replies (e.g. "RFQ-ABC23456").
+  reference String? @unique
+
+  // --- Request payload (single source of truth for DB + outbound email) ---
+  requiredDeliveryDate   DateTime? @map("required_delivery_date") @db.Date
+  deliveryLocation       String?   @map("delivery_location")
+  currency               String?   @db.VarChar(3)
+  targetBudget           Decimal?  @map("target_budget") @db.Decimal(16, 2)
+  incoterm               String?
+  paymentTerms           String?   @map("payment_terms")
+  additionalRequirements String?   @map("additional_requirements")
+  requestPayload         Json?     @map("request_payload")
+
+  // --- Microsoft Graph email pipeline ---
+  // emailStatus is null when the RFQ was never emailed (phone-only lead or
+  // Suppliers-page RFQ); it is independent from `status` (supplier/quote flow).
+  emailStatus            RFQEmailStatus? @map("email_status")
+  emailError             String?         @map("email_error")
+  emailAttempts          Int             @default(0) @map("email_attempts")
+  emailSentAt            DateTime?       @map("email_sent_at")
+  lastReplyAt            DateTime?       @map("last_reply_at")
+  graphMessageId         String?         @map("graph_message_id")
+  graphInternetMessageId String?         @map("graph_internet_message_id")
+  graphConversationId    String?         @map("graph_conversation_id")
+
+  attachments        RFQAttachment[]
+  quote              RFQQuote?
+  messages           RFQMessage[]
+  messageAttachments RFQMessageAttachment[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([leadCompanyId])
   @@index([batchId])
+  @@index([userId])
+  @@index([graphConversationId])
+  @@index([graphInternetMessageId])
   @@map("rfqs")
+  @@schema("public")
+}
+
+enum RFQEmailStatus {
+  QUEUED
+  SENT
+  WAITING_REPLY
+  REPLIED
+  FAILED
+
+  @@schema("public")
+}
+
+enum RFQMessageDirection {
+  OUTBOUND
+  INBOUND
+
+  @@schema("public")
+}
+
+enum RFQMessageKind {
+  RFQ_REQUEST
+  REPLY
+  AUTO_REPLY
+  BOUNCE
+
+  @@schema("public")
+}
+
+model RFQMessage {
+  id                    String              @id @default(cuid())
+  rfqId                 String              @map("rfq_id")
+  rfq                   RFQ                 @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  userId                String?             @map("user_id")
+  user                  User?               @relation("RFQMessageOwner", fields: [userId], references: [id], onDelete: SetNull)
+  direction             RFQMessageDirection
+  kind                  RFQMessageKind
+  graphMessageId        String              @unique @map("graph_message_id")
+  internetMessageId     String?             @map("internet_message_id")
+  conversationId        String?             @map("conversation_id")
+  inReplyTo             String?             @map("in_reply_to")
+  subject               String?
+  fromEmail             String?             @map("from_email")
+  fromName              String?             @map("from_name")
+  toRecipients          Json?               @map("to_recipients")
+  ccRecipients          Json?               @map("cc_recipients")
+  bodyText              String?             @map("body_text")
+  bodyHtml              String?             @map("body_html")
+  sentAt                DateTime?           @map("sent_at")
+  receivedAt            DateTime?           @map("received_at")
+  hasAttachments        Boolean             @default(false) @map("has_attachments")
+  matchedBy             String?             @map("matched_by")
+  senderMatchesSupplier Boolean?            @map("sender_matches_supplier")
+  graphMetadata         Json?               @map("graph_metadata")
+  attachments           RFQMessageAttachment[]
+  createdAt             DateTime            @default(now()) @map("created_at")
+
+  @@index([rfqId])
+  @@index([userId])
+  @@index([conversationId])
+  @@index([internetMessageId])
+  @@map("rfq_messages")
+  @@schema("public")
+}
+
+model RFQMessageAttachment {
+  id                String     @id @default(cuid())
+  messageId         String     @map("message_id")
+  message           RFQMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  rfqId             String     @map("rfq_id")
+  rfq               RFQ        @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  userId            String?    @map("user_id")
+  user              User?      @relation("RFQMessageAttachmentOwner", fields: [userId], references: [id], onDelete: SetNull)
+  graphMessageId    String     @map("graph_message_id")
+  graphAttachmentId String     @map("graph_attachment_id")
+  filename          String
+  mimeType          String?    @map("mime_type")
+  size              Int
+  isInline          Boolean    @default(false) @map("is_inline")
+  attachmentType    String     @map("attachment_type")
+  contentId         String?    @map("content_id")
+  createdAt         DateTime   @default(now()) @map("created_at")
+
+  @@unique([graphMessageId, graphAttachmentId])
+  @@index([rfqId])
+  @@map("rfq_message_attachments")
+  @@schema("public")
+}
+
+model GraphSubscription {
+  id                 String   @id
+  resource           String
+  changeType         String   @map("change_type")
+  notificationUrl    String   @map("notification_url")
+  expirationDateTime DateTime @map("expiration_date_time")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("graph_subscriptions")
   @@schema("public")
 }
 

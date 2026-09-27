@@ -1,23 +1,30 @@
+import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/api-auth';
 import { prisma } from '@/lib/prisma';
-import {
-  MAX_RFQ_ATTACHMENTS,
-  RFQ_CATEGORIES,
-  UNIT_OF_MEASURE_OPTIONS,
-} from '@/lib/rfq-constants';
+import { normalizeRfqRequestPayload } from '@/lib/rfq-payload';
+import { generateRfqReference } from '@/lib/rfq-reference';
+import { sendRfqEmail } from '@/lib/graph/rfq-mailer';
 
 export const runtime = 'nodejs';
+// Draft + attachment upload + send is several Graph round-trips.
+export const maxDuration = 26;
 
-const CATEGORY_VALUES = new Set<string>(RFQ_CATEGORIES);
-const UNIT_VALUES = new Set<string>(UNIT_OF_MEASURE_OPTIONS.map((o) => o.value));
-
-const ATTACHMENT_SELECT = {
-  id: true,
-  fileName: true,
-  fileSize: true,
-  mimeType: true,
-  createdAt: true,
+const RFQ_INCLUDE = {
+  buyer: { select: { id: true, legalName: true } },
+  supplier: { select: { id: true, legalName: true } },
+  product: { select: { id: true, name: true } },
+  attachments: {
+    select: {
+      id: true,
+      fileName: true,
+      fileSize: true,
+      mimeType: true,
+      createdAt: true,
+    },
+  },
+  quote: true,
+  _count: { select: { messages: true } },
 } as const;
 
 export async function POST(req: NextRequest) {
@@ -36,15 +43,12 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      title,
-      description,
-      quantity,
       supplierId,
       productId,
       // xDiscoveryBeta: RFQ targeting a not-yet-onboarded lead company.
-      // The "send" itself is mocked (no real email/SMS is dispatched) but
-      // we persist a full snapshot of the contact used so it shows up
-      // alongside real RFQs in RFQ Management.
+      // When an email address is on file, the RFQ is emailed through the
+      // shared Microsoft 365 mailbox; a full snapshot of the contact used
+      // is persisted so it shows up alongside real RFQs in RFQ Management.
       isExternal,
       leadCompanyId,
       externalCompanyName,
@@ -57,17 +61,13 @@ export async function POST(req: NextRequest) {
       // (e.g. a multi-select xDiscoveryBeta "Request Quote") so they render
       // as a single card in RFQ Management. Optional / caller-generated.
       batchId,
-      // RFQ quote-workflow fields (all optional — older callers such as the
-      // Suppliers page do not send them).
-      category,
-      itemName,
-      unitOfMeasure,
-      attachments,
     } = body;
 
-    if (!title) {
-      return NextResponse.json({ message: 'Title is required' }, { status: 400 });
+    const normalized = normalizeRfqRequestPayload(body, user.company.id);
+    if (!normalized.ok) {
+      return NextResponse.json({ message: normalized.message }, { status: 400 });
     }
+    const payload = normalized.payload;
 
     if (isExternal) {
       if (!externalCompanyName || (!externalContactEmail && !externalContactPhone)) {
@@ -80,111 +80,74 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: 'supplierId is required' }, { status: 400 });
     }
 
-    if (category !== undefined && category !== null) {
-      if (typeof category !== 'string' || !CATEGORY_VALUES.has(category)) {
-        return NextResponse.json({ message: 'Invalid category' }, { status: 400 });
-      }
-    }
+    const createData = {
+      title: payload.title,
+      description: payload.specifications,
+      category: payload.category,
+      itemName: payload.itemName,
+      quantity: payload.quantity,
+      unitOfMeasure: payload.unitOfMeasure,
+      buyerId: user.company.id,
+      userId: user.id,
+      supplierId: isExternal ? null : supplierId,
+      productId: productId || null,
+      isExternal: !!isExternal,
+      leadCompanyId: isExternal ? leadCompanyId ?? null : null,
+      externalCompanyName: isExternal ? externalCompanyName : null,
+      externalCompanyDomain: isExternal ? externalCompanyDomain || null : null,
+      externalContactName: isExternal ? externalContactName || null : null,
+      externalContactEmail: isExternal ? externalContactEmail || null : null,
+      externalContactPhone: isExternal ? externalContactPhone || null : null,
+      sentVia: isExternal ? sentVia || (externalContactEmail ? 'EMAIL' : 'PHONE') : null,
+      batchId: batchId || null,
+      requiredDeliveryDate: payload.requiredDeliveryDate
+        ? new Date(`${payload.requiredDeliveryDate}T00:00:00.000Z`)
+        : null,
+      deliveryLocation: payload.deliveryLocation,
+      currency: payload.currency,
+      targetBudget: payload.targetBudget,
+      incoterm: payload.incoterm,
+      paymentTerms: payload.paymentTerms,
+      additionalRequirements: payload.additionalRequirements,
+      requestPayload: payload as unknown as Prisma.InputJsonValue,
+      ...(payload.attachments.length > 0 && {
+        attachments: {
+          create: payload.attachments.map((a) => ({
+            storagePath: a.path,
+            fileName: a.fileName,
+            fileSize: a.fileSize,
+            mimeType: a.mimeType,
+            uploadedById: user.id,
+          })),
+        },
+      }),
+    };
 
-    const trimmedItemName = typeof itemName === 'string' ? itemName.trim() : '';
-    if (itemName !== undefined && itemName !== null) {
-      if (typeof itemName !== 'string' || trimmedItemName.length === 0 || trimmedItemName.length > 200) {
-        return NextResponse.json(
-          { message: 'itemName must be a non-empty string of at most 200 characters' },
-          { status: 400 },
-        );
-      }
-    }
-
-    if (unitOfMeasure !== undefined && unitOfMeasure !== null) {
-      if (typeof unitOfMeasure !== 'string' || !UNIT_VALUES.has(unitOfMeasure)) {
-        return NextResponse.json({ message: 'Invalid unit of measure' }, { status: 400 });
-      }
-    }
-
-    const attachmentCreates: {
-      storagePath: string;
-      fileName: string;
-      fileSize: number;
-      mimeType: string | null;
-      uploadedById: string;
-    }[] = [];
-    if (attachments !== undefined && attachments !== null) {
-      if (!Array.isArray(attachments) || attachments.length > MAX_RFQ_ATTACHMENTS) {
-        return NextResponse.json(
-          { message: `attachments must be an array of at most ${MAX_RFQ_ATTACHMENTS} items` },
-          { status: 400 },
-        );
-      }
-      const allowedPrefix = `${user.company.id}/`;
-      for (const attachment of attachments) {
-        if (
-          typeof attachment?.path !== 'string' ||
-          !attachment.path.startsWith(allowedPrefix)
-        ) {
-          return NextResponse.json(
-            { message: 'Invalid attachment path' },
-            { status: 400 },
-          );
-        }
-        if (typeof attachment?.fileName !== 'string' || !attachment.fileName.trim()) {
-          return NextResponse.json(
-            { message: 'Attachment fileName is required' },
-            { status: 400 },
-          );
-        }
-        const fileSize = Number(attachment?.fileSize);
-        if (!Number.isInteger(fileSize) || fileSize <= 0) {
-          return NextResponse.json(
-            { message: 'Attachment fileSize must be a positive integer' },
-            { status: 400 },
-          );
-        }
-        attachmentCreates.push({
-          storagePath: attachment.path,
-          fileName: attachment.fileName.trim().slice(0, 255),
-          fileSize,
-          mimeType:
-            typeof attachment?.mimeType === 'string' && attachment.mimeType
-              ? attachment.mimeType.slice(0, 255)
-              : null,
-          uploadedById: user.id,
+    // Retry on the (extremely unlikely) reference unique-collision.
+    let rfq = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        rfq = await prisma.rFQ.create({
+          data: { ...createData, reference: generateRfqReference() },
+          include: RFQ_INCLUDE,
         });
+        break;
+      } catch (err) {
+        const isReferenceCollision =
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002' &&
+          Array.isArray(err.meta?.target) &&
+          (err.meta.target as string[]).includes('reference');
+        if (!isReferenceCollision || attempt === 4) throw err;
       }
     }
 
-    const rfq = await prisma.rFQ.create({
-      data: {
-        title,
-        description: description || null,
-        category: category || null,
-        itemName: trimmedItemName || null,
-        quantity: quantity || null,
-        unitOfMeasure: unitOfMeasure || null,
-        buyerId: user.company.id,
-        supplierId: isExternal ? null : supplierId,
-        productId: productId || null,
-        isExternal: !!isExternal,
-        leadCompanyId: isExternal ? leadCompanyId ?? null : null,
-        externalCompanyName: isExternal ? externalCompanyName : null,
-        externalCompanyDomain: isExternal ? externalCompanyDomain || null : null,
-        externalContactName: isExternal ? externalContactName || null : null,
-        externalContactEmail: isExternal ? externalContactEmail || null : null,
-        externalContactPhone: isExternal ? externalContactPhone || null : null,
-        sentVia: isExternal ? sentVia || (externalContactEmail ? 'EMAIL' : 'PHONE') : null,
-        batchId: batchId || null,
-        ...(attachmentCreates.length > 0 && {
-          attachments: { create: attachmentCreates },
-        }),
-      },
-      include: {
-        buyer: { select: { id: true, legalName: true } },
-        supplier: { select: { id: true, legalName: true } },
-        product: { select: { id: true, name: true } },
-        attachments: { select: ATTACHMENT_SELECT },
-        quote: true,
-      },
-    });
+    // External leads with an email on file are emailed through the shared
+    // Microsoft 365 mailbox; phone-only leads keep emailStatus null.
+    if (rfq!.isExternal && rfq!.externalContactEmail) {
+      await sendRfqEmail(rfq!.id);
+      rfq = await prisma.rFQ.findUnique({ where: { id: rfq!.id }, include: RFQ_INCLUDE });
+    }
 
     return NextResponse.json(rfq);
   } catch (err) {

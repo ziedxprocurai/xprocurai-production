@@ -45,6 +45,22 @@ export const PAYMENT_TERMS_SUGGESTIONS = [
   '90 jours',
 ] as const;
 
+export const INCOTERMS = [
+  { value: 'EXW', label: "EXW – Ex Works / À l'usine" },
+  { value: 'FCA', label: 'FCA – Free Carrier / Franco transporteur' },
+  { value: 'CPT', label: "CPT – Carriage Paid To / Port payé jusqu'à" },
+  { value: 'CIP', label: 'CIP – Carriage and Insurance Paid / Port payé, assurance comprise' },
+  { value: 'DAP', label: 'DAP – Delivered at Place / Rendu au lieu de destination' },
+  { value: 'DPU', label: 'DPU – Delivered at Place Unloaded / Rendu déchargé' },
+  { value: 'DDP', label: 'DDP – Delivered Duty Paid / Rendu droits acquittés' },
+  { value: 'FAS', label: 'FAS – Free Alongside Ship / Franco le long du navire' },
+  { value: 'FOB', label: 'FOB – Free on Board / Franco à bord' },
+  { value: 'CFR', label: 'CFR – Cost and Freight / Coût et fret' },
+  { value: 'CIF', label: 'CIF – Cost, Insurance and Freight / Coût, assurance et fret' },
+] as const;
+
+export type IncotermValue = (typeof INCOTERMS)[number]['value'];
+
 export const MAX_RFQ_ATTACHMENTS = 10;
 export const MAX_RFQ_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 

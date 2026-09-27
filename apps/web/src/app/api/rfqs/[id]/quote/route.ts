@@ -22,7 +22,19 @@ const RFQ_INCLUDE = {
     },
   },
   quote: true,
+  _count: { select: { messages: true } },
 } as const;
+
+// Buyer-side ownership is per-user; the supplierId branch keeps the
+// onboarded-supplier "Received RFQs" inbox working.
+function accessFilter(user: { id: string; company: { id: string } | null }) {
+  return {
+    OR: [
+      { userId: user.id },
+      ...(user.company ? [{ supplierId: user.company.id }] : []),
+    ],
+  };
+}
 
 function badRequest(message: string) {
   return NextResponse.json({ message }, { status: 400 });
@@ -38,18 +50,11 @@ export async function GET(
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  if (!user.company) {
-    return NextResponse.json(
-      { message: 'User must belong to a company' },
-      { status: 403 },
-    );
-  }
-
   try {
     const rfq = await prisma.rFQ.findFirst({
       where: {
         id,
-        OR: [{ buyerId: user.company.id }, { supplierId: user.company.id }],
+        ...accessFilter(user),
       },
       select: { quote: true },
     });
@@ -78,20 +83,13 @@ export async function PUT(
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  if (!user.company) {
-    return NextResponse.json(
-      { message: 'User must belong to a company' },
-      { status: 403 },
-    );
-  }
-
   try {
     const body = await req.json();
 
     const rfq = await prisma.rFQ.findFirst({
       where: {
         id,
-        OR: [{ buyerId: user.company.id }, { supplierId: user.company.id }],
+        ...accessFilter(user),
       },
       include: { supplier: { select: { legalName: true } } },
     });

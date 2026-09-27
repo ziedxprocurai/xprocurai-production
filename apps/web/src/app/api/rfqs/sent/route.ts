@@ -10,13 +10,9 @@ export async function GET() {
     return NextResponse.json({ message: 'Not authenticated' }, { status: 401 });
   }
 
-  if (!user.company) {
-    return NextResponse.json([], { status: 200 });
-  }
-
   try {
     const rfqs = await prisma.rFQ.findMany({
-      where: { buyerId: user.company.id },
+      where: { userId: user.id },
       include: {
         buyer: { select: { id: true, legalName: true } },
         supplier: { select: { id: true, legalName: true } },
@@ -31,6 +27,7 @@ export async function GET() {
           },
         },
         quote: true,
+        _count: { select: { messages: true } },
       },
       orderBy: { createdAt: 'desc' },
     });

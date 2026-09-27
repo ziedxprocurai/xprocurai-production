@@ -44,3 +44,13 @@ export async function createAttachmentDownloadUrl(path: string, fileName?: strin
   }
   return data.signedUrl;
 }
+
+export async function downloadAttachment(path: string): Promise<Buffer> {
+  const { data, error } = await getSupabaseClient()
+    .storage.from(RFQ_ATTACHMENTS_BUCKET)
+    .download(path);
+  if (error || !data) {
+    throw new Error(error?.message || 'Failed to download attachment');
+  }
+  return Buffer.from(await data.arrayBuffer());
+}
