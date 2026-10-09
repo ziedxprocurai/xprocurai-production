@@ -10,14 +10,14 @@ import {
   Loader2,
   Send,
   X,
-  Filter,
-  ShoppingCart,
   FileSpreadsheet,
   Building,
   Mail,
   Phone,
   Globe,
 } from 'lucide-react';
+import { RfqAttachmentsField, RfqFormFields, type RfqFormValues } from '@/components/rfq/rfq-form-fields';
+import { uploadRfqAttachments } from '@/lib/rfq-attachments';
 
 interface Product {
   id: string;
@@ -36,10 +36,7 @@ interface Product {
   };
 }
 
-interface RFQFormData {
-  title: string;
-  description: string;
-  quantity: number;
+interface RFQFormData extends RfqFormValues {
   supplierId: string;
   productId?: string;
 }
@@ -69,11 +66,16 @@ export function SuppliersContent() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [rfqFormData, setRfqFormData] = useState<RFQFormData>({
     title: '',
+    category: '',
+    itemName: '',
     description: '',
     quantity: 1,
+    unitOfMeasure: 'PIECE',
     supplierId: '',
     productId: '',
   });
+  const [rfqFiles, setRfqFiles] = useState<File[]>([]);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [submittingRFQ, setSubmittingRFQ] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
 
@@ -130,38 +132,52 @@ export function SuppliersContent() {
     setSelectedProduct(product);
     setRfqFormData({
       title: `RFQ for ${product.name}`,
-      description: '',
+      category: '',
+      itemName: product.name,
+      description: product.description || '',
       quantity: 1,
+      unitOfMeasure: 'PIECE',
       supplierId: product.company.id,
       productId: product.id,
     });
+    setRfqFiles([]);
     setShowRFQModal(true);
     setError('');
     setSuccessMessage('');
   }
 
   function closeRFQModal() {
+    if (submittingRFQ) return;
     setShowRFQModal(false);
     setSelectedProduct(null);
     setRfqFormData({
       title: '',
+      category: '',
+      itemName: '',
       description: '',
       quantity: 1,
+      unitOfMeasure: 'PIECE',
       supplierId: '',
       productId: '',
     });
+    setRfqFiles([]);
   }
 
   async function handleRFQSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRFQ) return;
     setSubmittingRFQ(true);
     setError('');
 
     try {
+      const batchId = crypto.randomUUID();
+      setUploadingAttachments(rfqFiles.length > 0);
+      const attachments = await uploadRfqAttachments(rfqFiles, batchId);
+      setUploadingAttachments(false);
       const res = await fetch('/api/rfqs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rfqFormData),
+        body: JSON.stringify({ ...rfqFormData, batchId, attachments }),
       });
 
       if (res.ok) {
@@ -174,9 +190,10 @@ export function SuppliersContent() {
         const data = await res.json();
         setError(data.message || 'Failed to submit RFQ');
       }
-    } catch {
-      setError('Unable to connect to the server');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to connect to the server');
     } finally {
+      setUploadingAttachments(false);
       setSubmittingRFQ(false);
     }
   }
@@ -418,13 +435,15 @@ export function SuppliersContent() {
         {/* RFQ Modal */}
         {showRFQModal && selectedProduct && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-full max-w-lg rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-xl">
+            <div role="dialog" aria-modal="true" aria-label="Submit Request for Quote" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-xl">
               <div className="mb-6 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-[hsl(var(--foreground))]">
                   Submit Request for Quote
                 </h2>
                 <button
                   onClick={closeRFQModal}
+                  disabled={submittingRFQ}
+                  aria-label="Close RFQ form"
                   className="rounded-lg p-1 text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
                 >
                   <X className="h-5 w-5" />
@@ -452,47 +471,12 @@ export function SuppliersContent() {
               </div>
 
               <form onSubmit={handleRFQSubmit} className="space-y-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
-                    RFQ Title *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={rfqFormData.title}
-                    onChange={(e) => setRfqFormData({ ...rfqFormData, title: e.target.value })}
-                    className="w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
-                    placeholder="Enter RFQ title"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
-                    Description
-                  </label>
-                  <textarea
-                    value={rfqFormData.description}
-                    onChange={(e) => setRfqFormData({ ...rfqFormData, description: e.target.value })}
-                    rows={4}
-                    className="w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
-                    placeholder="Provide additional details about your requirements..."
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
-                    Quantity *
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min="1"
-                    value={rfqFormData.quantity}
-                    onChange={(e) => setRfqFormData({ ...rfqFormData, quantity: parseInt(e.target.value) || 1 })}
-                    className="w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
-                    placeholder="Enter quantity needed"
-                  />
-                </div>
+                <RfqFormFields
+                  value={rfqFormData}
+                  onChange={(value) => setRfqFormData((previous) => ({ ...previous, ...value }))}
+                  disabled={submittingRFQ}
+                />
+                <RfqAttachmentsField files={rfqFiles} onChange={setRfqFiles} disabled={submittingRFQ} />
 
                 {error && (
                   <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3">
@@ -513,6 +497,7 @@ export function SuppliersContent() {
                   <button
                     type="button"
                     onClick={closeRFQModal}
+                    disabled={submittingRFQ}
                     className="flex-1 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4 py-2.5 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--muted))]"
                   >
                     Cancel
@@ -525,7 +510,7 @@ export function SuppliersContent() {
                     {submittingRFQ ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Submitting...
+                        {uploadingAttachments ? 'Uploading attachments…' : 'Submitting…'}
                       </>
                     ) : (
                       <>

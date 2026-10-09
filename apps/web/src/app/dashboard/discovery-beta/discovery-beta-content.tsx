@@ -1203,6 +1203,7 @@ export function DiscoveryBetaContent() {
                 <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">RFQ Title *</label>
                 <input
                   required
+                  maxLength={300}
                   value={rfqTitle}
                   onChange={(e) => setRfqTitle(e.target.value)}
                   className="input-field"
@@ -1236,23 +1237,26 @@ export function DiscoveryBetaContent() {
                   </label>
                   <input
                     required
+                    maxLength={200}
                     value={rfqItemName}
                     onChange={(e) => setRfqItemName(e.target.value)}
                     className="input-field"
-                    placeholder="e.g. Cartons Kraft 60x40x40"
+                    placeholder="e.g. Carton Américain 30x40"
                   />
                 </div>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--foreground))]">
-                  Detailed Specifications
+                  Detailed Specifications *
                 </label>
                 <textarea
+                  required
+                  maxLength={20000}
                   value={rfqSpecifications}
                   onChange={(e) => setRfqSpecifications(e.target.value)}
                   rows={6}
                   className="input-field"
-                  placeholder="Dimensions, materials, standards, tolerances, packaging, delivery constraints..."
+                  placeholder="e.g. Double cannelure, kraft, imprimé 2 couleurs."
                 />
               </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
